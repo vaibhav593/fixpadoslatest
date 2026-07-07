@@ -206,10 +206,23 @@ class AssignWorkerReq(BaseModel):
 
 
 class WorkerKycReq(BaseModel):
-    photo: Optional[str] = ""
-    categories: Optional[List[str]] = None
+    # Required identity + contact.
+    email: str
+    # Full address block.
+    full_address: str
+    city: str
+    state: str
+    pincode: str
+    # Work profile.
+    experience: str  # e.g. "0-1 years", "5+ years", or free text
+    # Documents (all mandatory).
+    photo: str  # profile photo
+    live_selfie: str
     aadhaar_front: str
     aadhaar_back: str
+    # Skills.
+    categories: List[str]
+    # Optional.
     skill_certificate: Optional[str] = ""
 
 
@@ -403,13 +416,48 @@ async def get_worker(wid: str):
 async def upload_kyc(body: WorkerKycReq, user=Depends(get_current_user)):
     if user["role"] != "worker":
         raise HTTPException(403, "Worker only")
-    # Validate each document: MIME + size.
-    validate_doc_base64(body.photo or "", "Photo")
+    # ---- Field validation ----
+    if not (body.email or "").strip() or "@" not in body.email:
+        raise HTTPException(400, "Valid email is required")
+    if not (body.full_address or "").strip():
+        raise HTTPException(400, "Full address is required")
+    if not (body.city or "").strip():
+        raise HTTPException(400, "City is required")
+    if not (body.state or "").strip():
+        raise HTTPException(400, "State is required")
+    pincode = (body.pincode or "").strip()
+    if not pincode.isdigit() or len(pincode) != 6:
+        raise HTTPException(400, "Pincode must be a 6-digit number")
+    if not (body.experience or "").strip():
+        raise HTTPException(400, "Experience is required")
+    if not body.categories:
+        raise HTTPException(400, "Select at least one service category")
+    # ---- Document validation (all mandatory) ----
+    if not body.photo:
+        raise HTTPException(400, "Profile photo is required")
+    validate_doc_base64(body.photo, "Profile photo")
+    if not body.live_selfie:
+        raise HTTPException(400, "Live selfie is required")
+    validate_doc_base64(body.live_selfie, "Live selfie")
+    if not body.aadhaar_front:
+        raise HTTPException(400, "Aadhaar front is required")
     validate_doc_base64(body.aadhaar_front, "Aadhaar front")
+    if not body.aadhaar_back:
+        raise HTTPException(400, "Aadhaar back is required")
     validate_doc_base64(body.aadhaar_back, "Aadhaar back")
     if body.skill_certificate:
         validate_doc_base64(body.skill_certificate, "Skill certificate")
+
     update = {
+        "email": body.email.strip(),
+        "full_address": body.full_address.strip(),
+        "city": body.city.strip(),
+        "state": body.state.strip(),
+        "pincode": pincode,
+        "experience": body.experience.strip(),
+        "categories": body.categories,
+        "photo": body.photo,
+        "live_selfie": body.live_selfie,
         "kyc_docs": {
             "aadhaar_front": body.aadhaar_front,
             "aadhaar_back": body.aadhaar_back,
@@ -417,12 +465,11 @@ async def upload_kyc(body: WorkerKycReq, user=Depends(get_current_user)):
         },
         "kyc_status": "submitted",
         "kyc_submitted_at": now_utc(),
+        "verification_status": "pending_verification",
+        "verification_date": now_utc(),
     }
-    if body.photo:
-        update["photo"] = body.photo
-    if body.categories is not None:
-        update["categories"] = body.categories
     await db.users.update_one({"id": user["id"]}, {"$set": update})
+    await audit(user["id"], "worker_kyc_submitted", user["id"])
     u = await db.users.find_one({"id": user["id"]}, {"_id": 0})
     return clean(u)
 
@@ -523,7 +570,11 @@ async def worker_resubmit(user=Depends(get_current_user)):
 
 # ----------------- Bookings -----------------
 async def _auto_assign(booking: dict):
-    """Pick an approved+available worker for the category."""
+    """Pick an approved+available worker for the category.
+
+    Only workers with `kyc_status == "approved"` are ever considered — a
+    pending / rejected / incomplete-profile worker can never receive a booking.
+    """
     worker = await db.users.find_one(
         {"role": "worker", "categories": booking["category_id"], "available": True, "kyc_status": "approved"},
         {"_id": 0},
@@ -534,9 +585,6 @@ async def _auto_assign(booking: dict):
         )
     if not worker:
         worker = await db.users.find_one({"role": "worker", "kyc_status": "approved"}, {"_id": 0})
-    if not worker:
-        # Last-resort fallback for empty/fresh systems — pick anyone.
-        worker = await db.users.find_one({"role": "worker"}, {"_id": 0})
     if not worker:
         return None
     await db.bookings.update_one(
@@ -1062,8 +1110,15 @@ async def seed_db():
                 "mobile": f"99999000{i+1}",
                 "role": "worker",
                 "name": n,
+                "email": f"{n.split()[0].lower()}.demo@fixpados.com",
+                "full_address": f"{i+1} Demo Street, Bandra",
+                "city": "Mumbai",
+                "state": "Maharashtra",
+                "pincode": "400050",
+                "experience": ["1-3 years", "3-5 years", "5+ years"][i % 3],
                 "kyc_status": "approved",
                 "kyc_docs": {},
+                "live_selfie": photos[i],
                 "rejection_reason": None,
                 "verified": True,
                 "rating": 4.5 + (i * 0.1),

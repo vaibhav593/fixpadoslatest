@@ -1,11 +1,53 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Tabs } from "expo-router";
+import { Tabs, useRouter } from "expo-router";
+import { useEffect, useState } from "react";
+import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { colors } from "@/src/theme";
+import { api, getCachedUser, setCachedUser } from "@/src/api";
 
+/**
+ * Worker route-group guard: only sessions with `kyc_status === "approved"`
+ * may enter the jobs / earnings / profile tabs. Everyone else is bounced
+ * to the appropriate onboarding / pending / rejected page.
+ */
 export default function WorkerLayout() {
+  const router = useRouter();
   const insets = useSafeAreaInsets();
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const cached = await getCachedUser();
+      if (!cached || cached.role !== "worker") {
+        router.replace("/role");
+        return;
+      }
+      try {
+        const me = await api.me();
+        await setCachedUser(me);
+        const status = (me as any).kyc_status;
+        if (status === "approved") {
+          setReady(true);
+          return;
+        }
+        if (status === "submitted") router.replace("/worker-pending");
+        else if (status === "rejected") router.replace("/worker-rejected");
+        else router.replace("/worker-onboarding");
+      } catch {
+        router.replace("/role");
+      }
+    })();
+  }, [router]);
+
+  if (!ready) {
+    return (
+      <View testID="worker-guard-loading" style={styles.wrap}>
+        <ActivityIndicator size="large" color="#10B981" />
+      </View>
+    );
+  }
+
   return (
     <Tabs
       screenOptions={{
@@ -38,3 +80,7 @@ export default function WorkerLayout() {
     </Tabs>
   );
 }
+
+const styles = StyleSheet.create({
+  wrap: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#0F172A" },
+});

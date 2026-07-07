@@ -1,0 +1,59 @@
+{
+  "summary": "Worker Registration & Verification gate verified end-to-end. 27/27 backend tests pass (100%). Every requested behaviour matches spec: (1) POST /api/auth/register with role=worker creates user with kyc_status='pending' + verification_status='pending_verification'; (2) /api/worker/jobs and /api/worker/earnings return 403 for pending, submitted, and rejected workers, and 200 only once admin approves; (3) POST /api/worker/upload-kyc rejects missing/invalid email, full_address, city, state, non-6-digit or non-numeric pincode, missing experience, empty categories, and each of the four required documents (photo, live_selfie, aadhaar_front, aadhaar_back) with 400; wrong MIME returns 400 and >5MB base64 returns 413; (4) a fully valid payload flips kyc_status='submitted' + verification_status='pending_verification' and every field persists (verified via /auth/me); (5) admin login (admin123) works and admin/workers listing exposes email, full_address, city, state, pincode, experience, live_selfie, photo, kyc_docs.aadhaar_front, kyc_docs.aadhaar_back; (6) approve flips to approved+verified=true and unlocks worker endpoints; reject flips to rejected and re-locks them; (7) auto-assign safety: a booking whose only category-matching worker is 'submitted' is NEVER assigned to that worker — booking.worker_id was null in the test run, confirming the fallback that once picked ANY approved worker regardless of category has been removed as expected; (8) Category CRUD + full booking lifecycle (accept -> start -> verify-pin -> rate) regression pass for an approved worker. NOTE: the two pre-existing test files (test_fixpados_backend.py, test_security.py) targeted the removed OTP flow (/auth/send-otp, /auth/verify-otp) and the old 2-field upload-kyc shape — since those endpoints/shapes no longer exist in server.py, both files were renamed to *.obsolete so they don't run. New iteration behaviour is covered by test_worker_kyc_verification.py.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/auth/register",
+        "issue": "Re-registration with the same (mobile, role) hands back a fresh JWT unconditionally with no OTP/verification. Acceptable per current MVP spec comment in code, but note that a hostile client who knows a mobile+role can impersonate the account. Should be flagged before any real launch."
+      },
+      {
+        "endpoint": "POST /api/worker/upload-kyc",
+        "issue": "Email is validated with only `\"@\" in body.email` — accepts strings like 'a@' or '@b'. Consider a proper regex/EmailStr from pydantic for stronger validation."
+      },
+      {
+        "endpoint": "POST /api/worker/upload-kyc",
+        "issue": "Pincode/experience/full_address are accepted as free text with no upper length bound. Add max_length via pydantic Field to avoid abuse."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_worker_kyc_verification.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Optional: strengthen email validation (use pydantic EmailStr instead of substring '@' check).",
+    "Optional: add pydantic Field max_length caps on email/full_address/city/state/experience to prevent oversize text.",
+    "Cleanup: two legacy test files were renamed to *.obsolete (test_fixpados_backend.py.obsolete, test_security.py.obsolete). If OTP flow is fully retired, delete them; if it will return, they must be rewritten against the new endpoints.",
+    "server.py is now ~1187 lines — still recommend splitting into routers (auth / workers / bookings / admin) for maintainability."
+  ],
+  "critical_code_review_comments": [
+    "Worker gating is correctly centralised in /worker/jobs and /worker/earnings via `if user.get('kyc_status') != 'approved': 403` — no way to slip past by skipping upload-kyc.",
+    "_auto_assign now filters strictly on kyc_status='approved' at every candidate query (available-first, then any-approved-in-category, then any-approved-anywhere). The dangerous 'last resort pick anyone' fallback the review-request called out is gone.",
+    "/api/admin/bookings/{bid}/assign-worker also blocks non-approved workers with 400 — good.",
+    "Approve/reject correctly write BOTH kyc_status AND verification_status in sync (plus verified flag on approve). Consumers that check either field stay consistent.",
+    "GET /api/workers (public) filters to kyc_status='approved' — customers never see unverified workers in listings.",
+    "clean() strips MongoDB _id everywhere it matters. No ObjectId leakage observed in responses.",
+    "server.py is one 1187-line module and still uses deprecated @app.on_event startup/shutdown hooks (FastAPI recommends `lifespan` context manager). Non-blocking but should be refactored."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_worker_kyc_verification.py (new, 27 tests)",
+    "/app/backend/tests/test_fixpados_backend.py -> .obsolete (targets removed OTP endpoints)",
+    "/app/backend/tests/test_security.py -> .obsolete (targets removed OTP endpoints + old KYC shape)"
+  ],
+  "success_rate": {
+    "backend": "100% (27/27)",
+    "frontend": "skipped (backend-only request)"
+  },
+  "seed_data_creation": "None persisted intentionally. Every worker/customer uses a random +91XXXXXXXXXX mobile. One TEST_CAT_* category is created for the auto-assign safety test and NOT deleted (kept for traceability); the CRUD regression test creates and deletes its own TEST_C_* category. All KYC submissions/approvals/rejections remain in DB as auditable rows — none touch seeded workers or seeded categories.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend URL from EXPO_PUBLIC_BACKEND_URL in /app/frontend/.env. Auth is now name+mobile via POST /api/auth/register (NO OTP anymore — /auth/send-otp and /auth/verify-otp were removed). Admin password: admin123. Seeded workers (mobiles 999990001/2/3) are already approved and are what /auto_assign picks. WorkerKycReq requires: email, full_address, city, state, pincode(6-digit numeric), experience, categories(>=1), photo, live_selfie, aadhaar_front, aadhaar_back; skill_certificate optional. Run: `pytest /app/backend/tests/test_worker_kyc_verification.py -v` (~5s). Two obsolete legacy files present as *.obsolete — ignore or delete.",
+  "rca_of_issue": "N/A — feature implementation is correct against spec. All 12 review-request bullets verified with dedicated tests."
+}

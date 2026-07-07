@@ -21,9 +21,11 @@ export default function Index() {
         if (me.role === "admin") router.replace("/admin/dashboard");
         else if (me.role === "worker") {
           const status = (me as any).kyc_status;
-          if (status === "rejected") router.replace("/worker-rejected");
-          else if (status === "approved") router.replace("/(worker)/jobs");
-          else router.replace("/worker-pending"); // pending or submitted
+          if (status === "approved") router.replace("/(worker)/jobs");
+          else if (status === "submitted") router.replace("/worker-pending");
+          else if (status === "rejected") router.replace("/worker-rejected");
+          // "pending" (never submitted docs) → force full profile first.
+          else router.replace("/worker-onboarding");
         } else router.replace("/(customer)/home");
       } catch {
         await clearSession();

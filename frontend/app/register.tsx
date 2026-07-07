@@ -45,9 +45,11 @@ export default function Register() {
       await setCachedUser(res.user);
       if (res.user.role === "worker") {
         const status = (res.user as { kyc_status?: string }).kyc_status;
-        if (status === "rejected") router.replace("/worker-rejected");
-        else if (status === "approved") router.replace("/(worker)/jobs");
-        else router.replace("/worker-pending");
+        if (status === "approved") router.replace("/(worker)/jobs");
+        else if (status === "submitted") router.replace("/worker-pending");
+        else if (status === "rejected") router.replace("/worker-rejected");
+        // "pending" (never submitted) → must complete full profile first.
+        else router.replace("/worker-onboarding");
       } else {
         router.replace("/(customer)/home");
       }

@@ -4,7 +4,6 @@ import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
   Image,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -19,7 +18,7 @@ import { Toast } from "@/src/components/Toast";
 import { api, getCachedUser, setCachedUser } from "@/src/api";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 
-async function pickImage(): Promise<string | null> {
+async function pickFromLibrary(): Promise<string | null> {
   const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (!perm.granted) return null;
   const res = await ImagePicker.launchImageLibraryAsync({
@@ -31,16 +30,48 @@ async function pickImage(): Promise<string | null> {
   return `data:image/jpeg;base64,${res.assets[0].base64}`;
 }
 
+async function captureFromCamera(): Promise<string | null> {
+  const perm = await ImagePicker.requestCameraPermissionsAsync();
+  if (!perm.granted) return null;
+  const res = await ImagePicker.launchCameraAsync({
+    mediaTypes: ImagePicker.MediaTypeOptions.Images,
+    quality: 0.5,
+    base64: true,
+    cameraType: ImagePicker.CameraType.front,
+  });
+  if (res.canceled || !res.assets?.[0]?.base64) return null;
+  return `data:image/jpeg;base64,${res.assets[0].base64}`;
+}
+
+const EXPERIENCE_OPTIONS = ["0-1 years", "1-3 years", "3-5 years", "5+ years"];
+
 export default function WorkerOnboarding() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [categories, setCategories] = useState<any[]>([]);
-  const [photo, setPhoto] = useState<string>("");
+
+  // Basic details
+  const [name, setName] = useState("");
+  const [mobile, setMobile] = useState("");
+  const [email, setEmail] = useState("");
+
+  // Address
+  const [fullAddress, setFullAddress] = useState("");
+  const [city, setCity] = useState("");
+  const [stateName, setStateName] = useState("");
+  const [pincode, setPincode] = useState("");
+
+  // Work details
   const [selectedCats, setSelectedCats] = useState<string[]>([]);
+  const [experience, setExperience] = useState("");
+
+  // Verification documents
+  const [photo, setPhoto] = useState<string>("");
+  const [liveSelfie, setLiveSelfie] = useState<string>("");
   const [aadhaarFront, setAadhaarFront] = useState<string>("");
   const [aadhaarBack, setAadhaarBack] = useState<string>("");
   const [skillCert, setSkillCert] = useState<string>("");
-  const [name, setName] = useState("");
+
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -50,8 +81,19 @@ export default function WorkerOnboarding() {
       setUser(u);
       if (u) {
         setName(u.name || "");
+        setMobile(u.mobile || "");
+        setEmail((u as any).email || "");
+        setFullAddress((u as any).full_address || "");
+        setCity((u as any).city || "");
+        setStateName((u as any).state || "");
+        setPincode((u as any).pincode || "");
+        setExperience((u as any).experience || "");
         setPhoto(u.photo || "");
-        setSelectedCats(u.categories || []);
+        setLiveSelfie((u as any).live_selfie || "");
+        setSelectedCats((u.categories || []) as string[]);
+        setAadhaarFront((u as any).kyc_docs?.aadhaar_front || "");
+        setAadhaarBack((u as any).kyc_docs?.aadhaar_back || "");
+        setSkillCert((u as any).kyc_docs?.skill_certificate || "");
       }
       try {
         setCategories(await api.listCategories(true));
@@ -65,24 +107,41 @@ export default function WorkerOnboarding() {
 
   const submit = async () => {
     setErr("");
-    if (!name.trim()) return setErr("Enter your name");
-    if (selectedCats.length === 0) return setErr("Select at least one skill / category");
+    if (!name.trim()) return setErr("Enter your full name");
+    if (!email.includes("@")) return setErr("Enter a valid email");
+    if (!fullAddress.trim()) return setErr("Enter your full address");
+    if (!city.trim()) return setErr("Enter your city");
+    if (!stateName.trim()) return setErr("Enter your state");
+    if (!/^\d{6}$/.test(pincode.trim())) return setErr("Pincode must be 6 digits");
+    if (selectedCats.length === 0) return setErr("Select at least one service category");
+    if (!experience) return setErr("Select your experience");
+    if (!photo) return setErr("Upload a profile photo");
+    if (!liveSelfie) return setErr("Capture a live selfie");
     if (!aadhaarFront) return setErr("Upload Aadhaar front");
     if (!aadhaarBack) return setErr("Upload Aadhaar back");
+
     setLoading(true);
     try {
-      if (name !== user?.name) {
-        await api.updateProfile({ name });
+      if (name.trim() !== user?.name) {
+        await api.updateProfile({ name: name.trim() });
       }
       const u = await api.uploadKyc({
+        email: email.trim(),
+        full_address: fullAddress.trim(),
+        city: city.trim(),
+        state: stateName.trim(),
+        pincode: pincode.trim(),
+        experience,
         photo,
-        categories: selectedCats,
+        live_selfie: liveSelfie,
         aadhaar_front: aadhaarFront,
         aadhaar_back: aadhaarBack,
         skill_certificate: skillCert,
+        categories: selectedCats,
       });
-      await setCachedUser(u);
-      router.replace("/(worker)/jobs");
+      await setCachedUser(u as any);
+      // Submitted → verification pending page.
+      router.replace("/worker-pending");
     } catch (e: any) {
       setErr(e.message || "Could not submit");
     } finally {
@@ -94,14 +153,16 @@ export default function WorkerOnboarding() {
     label,
     value,
     onPick,
-    optional,
     testID,
+    optional,
+    hint,
   }: {
     label: string;
     value: string;
     onPick: () => void;
-    optional?: boolean;
     testID: string;
+    optional?: boolean;
+    hint?: string;
   }) => (
     <TouchableOpacity
       testID={testID}
@@ -115,6 +176,7 @@ export default function WorkerOnboarding() {
         <View style={styles.docPlaceholder}>
           <Ionicons name="cloud-upload" color={colors.brand} size={26} />
           <Text style={styles.docLabel}>{label}</Text>
+          {hint ? <Text style={styles.docOptional}>{hint}</Text> : null}
           {optional ? <Text style={styles.docOptional}>(optional)</Text> : null}
         </View>
       )}
@@ -127,66 +189,103 @@ export default function WorkerOnboarding() {
     </TouchableOpacity>
   );
 
-  // KYC status banner
   const status = user?.kyc_status;
 
   return (
-    <SafeAreaView style={styles.wrap} edges={["top", "bottom"]}>
+    <SafeAreaView style={styles.wrap} edges={["top", "bottom"]} testID="worker-onboarding-screen">
       <View style={styles.head}>
-        <Text style={styles.title}>Worker Verification</Text>
-        <Text style={styles.subtitle}>Complete your profile to start receiving jobs</Text>
+        <Text style={styles.title}>Complete Your Profile</Text>
+        <Text style={styles.subtitle}>
+          Fill every section — you cannot receive jobs without admin approval.
+        </Text>
       </View>
 
       <KeyboardAwareScrollView
-        contentContainerStyle={{ padding: spacing.lg, paddingBottom: 120, gap: spacing.lg }}
+        contentContainerStyle={{ padding: spacing.lg, paddingBottom: 140, gap: spacing.lg }}
         bottomOffset={90}
       >
         {status === "submitted" ? (
-          <Toast type="info" message="Your KYC is under review by admin. You'll be notified shortly." />
+          <Toast type="info" message="Your profile is under review by admin." />
         ) : null}
         {status === "rejected" ? (
-          <Toast type="error" message={`KYC rejected: ${user?.rejection_reason || "Please re-submit"}`} />
-        ) : null}
-        {status === "approved" ? (
-          <Toast type="success" message="You're verified ✓ — update info if needed" />
+          <Toast type="error" message={`Rejected: ${user?.rejection_reason || "Please re-submit"}`} />
         ) : null}
 
-        {/* Photo */}
-        <View style={[styles.card, shadow.card, { alignItems: "center" }]}>
-          <TouchableOpacity
-            testID="worker-photo-picker"
-            onPress={async () => {
-              const p = await pickImage();
-              if (p) setPhoto(p);
-            }}
-            style={styles.photoWrap}
-          >
-            {photo ? (
-              <Image source={{ uri: photo }} style={styles.photo} />
-            ) : (
-              <Ionicons name="camera" color={colors.brand} size={36} />
-            )}
-          </TouchableOpacity>
-          <Text style={styles.photoLabel}>Profile Photo</Text>
-        </View>
-
-        {/* Name */}
-        <View>
-          <Text style={styles.label}>Name</Text>
-          <TextInput
-            testID="worker-name-input"
+        {/* ── Basic Details ────────────────────────── */}
+        <SectionTitle icon="person" title="Basic Details" />
+        <View style={styles.card}>
+          <LabeledInput
+            label="Full Name"
             value={name}
             onChangeText={setName}
-            placeholder="Your full name"
-            placeholderTextColor={colors.textFaint}
-            style={styles.input}
+            placeholder="e.g. Rajesh Kumar"
+            testID="worker-name-input"
+          />
+          <LabeledInput
+            label="Mobile Number"
+            value={mobile}
+            editable={false}
+            placeholder=""
+            testID="worker-mobile-input"
+          />
+          <LabeledInput
+            label="Email"
+            value={email}
+            onChangeText={setEmail}
+            placeholder="you@example.com"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            testID="worker-email-input"
           />
         </View>
 
-        {/* Categories */}
-        <View>
-          <Text style={styles.label}>Skills / Categories</Text>
-          <Text style={styles.hint}>Select all that apply</Text>
+        {/* ── Address ─────────────────────────────── */}
+        <SectionTitle icon="location" title="Address" />
+        <View style={styles.card}>
+          <LabeledInput
+            label="Full Address"
+            value={fullAddress}
+            onChangeText={setFullAddress}
+            placeholder="House / Street / Area"
+            multiline
+            testID="worker-address-input"
+          />
+          <View style={{ flexDirection: "row", gap: spacing.md }}>
+            <View style={{ flex: 1 }}>
+              <LabeledInput
+                label="City"
+                value={city}
+                onChangeText={setCity}
+                placeholder="e.g. Mumbai"
+                testID="worker-city-input"
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <LabeledInput
+                label="State"
+                value={stateName}
+                onChangeText={setStateName}
+                placeholder="e.g. Maharashtra"
+                testID="worker-state-input"
+              />
+            </View>
+          </View>
+          <LabeledInput
+            label="Pincode"
+            value={pincode}
+            onChangeText={(t) => setPincode(t.replace(/\D/g, "").slice(0, 6))}
+            placeholder="6-digit pincode"
+            keyboardType="number-pad"
+            maxLength={6}
+            testID="worker-pincode-input"
+          />
+        </View>
+
+        {/* ── Work Details ────────────────────────── */}
+        <SectionTitle icon="briefcase" title="Work Details" />
+        <View style={styles.card}>
+          <Text style={styles.fieldLabel}>Service Category</Text>
+          <Text style={styles.hint}>Select all you can service</Text>
           <View style={styles.chipsWrap}>
             {categories.map((c) => {
               const active = selectedCats.includes(c.id);
@@ -203,20 +302,56 @@ export default function WorkerOnboarding() {
               );
             })}
           </View>
+
+          <Text style={[styles.fieldLabel, { marginTop: spacing.md }]}>Experience</Text>
+          <View style={styles.chipsWrap}>
+            {EXPERIENCE_OPTIONS.map((exp) => {
+              const active = experience === exp;
+              return (
+                <TouchableOpacity
+                  key={exp}
+                  testID={`worker-exp-${exp}`}
+                  onPress={() => setExperience(exp)}
+                  style={[styles.chip, active && styles.chipActive]}
+                >
+                  <Text style={[styles.chipTxt, active && { color: "#fff" }]}>{exp}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
         </View>
 
-        {/* Documents */}
-        <View>
-          <Text style={styles.label}>Identity Documents</Text>
-          <Text style={styles.hint}>Aadhaar card (front + back) is mandatory</Text>
-          <View style={{ flexDirection: "row", gap: spacing.md, marginTop: spacing.sm }}>
+        {/* ── Verification ───────────────────────── */}
+        <SectionTitle icon="shield-checkmark" title="Verification (Mandatory)" />
+        <View style={[styles.card, { gap: spacing.md }]}>
+          <Doc
+            testID="worker-photo-picker"
+            label="Profile Photo"
+            value={photo}
+            hint="Tap to upload"
+            onPick={async () => {
+              const p = await pickFromLibrary();
+              if (p) setPhoto(p);
+            }}
+          />
+          <Doc
+            testID="worker-live-selfie-picker"
+            label="Live Selfie (Camera)"
+            value={liveSelfie}
+            hint="Tap to open camera"
+            onPick={async () => {
+              const p = await captureFromCamera();
+              if (p) setLiveSelfie(p);
+            }}
+          />
+          <View style={{ flexDirection: "row", gap: spacing.md }}>
             <View style={{ flex: 1 }}>
               <Doc
                 testID="aadhaar-front-picker"
                 label="Aadhaar Front"
                 value={aadhaarFront}
                 onPick={async () => {
-                  const p = await pickImage();
+                  const p = await pickFromLibrary();
                   if (p) setAadhaarFront(p);
                 }}
               />
@@ -227,24 +362,22 @@ export default function WorkerOnboarding() {
                 label="Aadhaar Back"
                 value={aadhaarBack}
                 onPick={async () => {
-                  const p = await pickImage();
+                  const p = await pickFromLibrary();
                   if (p) setAadhaarBack(p);
                 }}
               />
             </View>
           </View>
-          <View style={{ marginTop: spacing.md }}>
-            <Doc
-              testID="skill-cert-picker"
-              label="Skill Certificate"
-              value={skillCert}
-              optional
-              onPick={async () => {
-                const p = await pickImage();
-                if (p) setSkillCert(p);
-              }}
-            />
-          </View>
+          <Doc
+            testID="skill-cert-picker"
+            label="Skill Certificate"
+            value={skillCert}
+            optional
+            onPick={async () => {
+              const p = await pickFromLibrary();
+              if (p) setSkillCert(p);
+            }}
+          />
         </View>
 
         {err ? <Toast type="error" message={err} /> : null}
@@ -253,22 +386,55 @@ export default function WorkerOnboarding() {
       <View style={[styles.cta, shadow.pop]}>
         <Button
           testID="submit-kyc-button"
-          label={status === "approved" ? "Update Profile" : "Submit for Verification"}
+          label="Submit for Verification"
           icon="cloud-upload"
           onPress={submit}
           loading={loading}
         />
-        {status === "approved" ? (
-          <TouchableOpacity
-            testID="skip-onboarding"
-            onPress={() => router.replace("/(worker)/jobs")}
-            style={{ marginTop: spacing.sm }}
-          >
-            <Text style={{ textAlign: "center", color: colors.textMuted, fontWeight: "600" }}>Skip</Text>
-          </TouchableOpacity>
-        ) : null}
       </View>
     </SafeAreaView>
+  );
+}
+
+function SectionTitle({ icon, title }: { icon: any; title: string }) {
+  return (
+    <View style={styles.sectionRow}>
+      <View style={styles.sectionIcon}>
+        <Ionicons name={icon} color={colors.brand} size={16} />
+      </View>
+      <Text style={styles.sectionTitle}>{title}</Text>
+    </View>
+  );
+}
+
+function LabeledInput({
+  label,
+  ...rest
+}: {
+  label: string;
+  value: string;
+  onChangeText?: (t: string) => void;
+  placeholder: string;
+  testID: string;
+  keyboardType?: any;
+  autoCapitalize?: any;
+  maxLength?: number;
+  editable?: boolean;
+  multiline?: boolean;
+}) {
+  return (
+    <View>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <TextInput
+        {...rest}
+        placeholderTextColor={colors.textFaint}
+        style={[
+          styles.input,
+          rest.multiline && { minHeight: 64, textAlignVertical: "top" },
+          rest.editable === false && { color: colors.textMuted, backgroundColor: colors.borderSoft },
+        ]}
+      />
+    </View>
   );
 }
 
@@ -278,24 +444,39 @@ const styles = StyleSheet.create({
   title: { fontSize: 24, fontWeight: "800", color: colors.text },
   subtitle: { color: colors.textMuted, marginTop: 4, fontSize: 13 },
 
-  card: { backgroundColor: colors.surface, borderRadius: radius.xl, padding: spacing.lg },
-
-  photoWrap: {
-    width: 96, height: 96, borderRadius: 48,
+  sectionRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 },
+  sectionIcon: {
+    width: 28, height: 28, borderRadius: 14,
     backgroundColor: colors.brandLight,
     alignItems: "center", justifyContent: "center",
-    marginBottom: 6,
-    overflow: "hidden",
   },
-  photo: { width: "100%", height: "100%" },
-  photoLabel: { color: colors.textMuted, fontWeight: "600", fontSize: 13 },
+  sectionTitle: { fontSize: 14, fontWeight: "800", color: colors.text, letterSpacing: 0.3 },
 
-  label: { fontSize: 12, fontWeight: "800", color: colors.textMuted, letterSpacing: 0.6, marginBottom: 4 },
+  card: { backgroundColor: colors.surface, borderRadius: radius.xl, padding: spacing.lg, gap: spacing.md },
+
+  fieldLabel: {
+    fontSize: 12, fontWeight: "800", color: colors.textMuted,
+    letterSpacing: 0.6, marginBottom: 4,
+  },
   hint: { fontSize: 12, color: colors.textMuted, marginBottom: 8 },
-  input: { backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, paddingHorizontal: spacing.md, paddingVertical: 12, fontSize: 14, color: colors.text },
+  input: {
+    backgroundColor: colors.bg,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: colors.text,
+  },
 
   chipsWrap: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
-  chip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  chip: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    paddingHorizontal: 14, paddingVertical: 8,
+    borderRadius: radius.pill, borderWidth: 1,
+    borderColor: colors.border, backgroundColor: colors.surface,
+  },
   chipActive: { backgroundColor: colors.brand, borderColor: colors.brand },
   chipTxt: { fontWeight: "700", color: colors.text, fontSize: 13 },
 

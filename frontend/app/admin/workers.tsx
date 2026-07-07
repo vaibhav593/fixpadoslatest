@@ -122,6 +122,24 @@ export default function AdminWorkers() {
                 </View>
               </View>
 
+              {/* Basic + Address details */}
+              <View style={adminStyles.card}>
+                <Text style={adminStyles.sectionTitle}>Applicant Details</Text>
+                <DetailRow label="Email" value={active?.email || "—"} testID="worker-detail-email" />
+                <DetailRow label="Full Address" value={active?.full_address || "—"} testID="worker-detail-address" />
+                <DetailRow label="City" value={active?.city || "—"} testID="worker-detail-city" />
+                <DetailRow label="State" value={active?.state || "—"} testID="worker-detail-state" />
+                <DetailRow label="Pincode" value={active?.pincode || "—"} testID="worker-detail-pincode" />
+                <DetailRow label="Experience" value={active?.experience || "—"} testID="worker-detail-experience" />
+              </View>
+
+              {active?.live_selfie ? (
+                <View>
+                  <Text style={adminStyles.sectionTitle}>Live Selfie</Text>
+                  <Image testID="worker-detail-live-selfie" source={{ uri: active.live_selfie }} style={styles.doc} />
+                </View>
+              ) : null}
+
               <View>
                 <Text style={adminStyles.sectionTitle}>Aadhaar Front</Text>
                 {active?.kyc_docs?.aadhaar_front ? (
@@ -200,6 +218,15 @@ function labelOf(s?: string) {
   return "Pending Verification";
 }
 
+function DetailRow({ label, value, testID }: { label: string; value: string; testID?: string }) {
+  return (
+    <View style={styles.detailRow}>
+      <Text style={styles.detailLabel}>{label}</Text>
+      <Text testID={testID} style={styles.detailValue}>{value}</Text>
+    </View>
+  );
+}
+
 function badgeColor(s?: string, bg = false) {
   if (s === "approved") return bg ? colors.successBg : colors.success;
   if (s === "rejected") return bg ? colors.dangerBg : colors.danger;
@@ -238,4 +265,14 @@ const styles = StyleSheet.create({
   bigAvatar: { width: 72, height: 72, borderRadius: 36 },
   bigName: { fontSize: 18, fontWeight: "800", color: colors.text },
   doc: { width: "100%", height: 180, borderRadius: radius.md, marginTop: 6, backgroundColor: colors.bg, resizeMode: "cover" },
+
+  detailRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: spacing.md,
+    paddingVertical: 4,
+  },
+  detailLabel: { color: colors.textMuted, fontWeight: "700", fontSize: 12, flexShrink: 0 },
+  detailValue: { color: colors.text, fontWeight: "600", fontSize: 13, flex: 1, textAlign: "right" },
 });

@@ -97,17 +97,20 @@
 #====================================================================================================
 
 user_problem_statement: |
-  Production-ready MVP for a hyperlocal home services platform (HomeMate) connecting
-  customers with verified local workers. Customer app (location, booking, status, chat,
-  PIN verification, ratings). Worker app (registration, multi-category, Aadhaar KYC,
-  dashboard, accept/reject/cancel, online/offline, dark theme). Admin panel (dashboard,
-  worker approvals, categories, banners, analytics, chat monitoring). Tech & Security:
-  role-based permissions, 5-minute OTP expiry, OTP rate limiting (3/min), audit logs,
-  5MB JPG/PNG/PDF file limits, private document storage. Stack stays on MongoDB+FastAPI
-  with mock OTP (code `123456`). Twilio swap is future.
+  Fix Worker Registration & Verification flow: workers must NOT reach the pending
+  verification page after only entering Name + Mobile. They must first fill:
+  - Basic Details (Full Name, Mobile, Email)
+  - Address (Full Address, City, State, Pincode)
+  - Work Details (Service Category, Experience)
+  - Verification (Profile Photo, Live Selfie, Aadhaar Front, Aadhaar Back)
+  Only after all these are submitted should the status become "pending_verification".
+  Admin can view all submitted details + images and Approve / Reject.
+  Only approved workers can access jobs / earnings / go online. Pending/rejected
+  workers cannot receive bookings. Bookings must NEVER be assigned to a
+  non-approved worker.
 
 backend:
-  - task: "Auth: send-otp + verify-otp with mock 123456, 5-min expiry, 3/min rate-limit, 5 attempts cap"
+  - task: "POST /api/worker/upload-kyc requires email, full_address, city, state, pincode (6-digit), experience, categories, profile photo, live_selfie, aadhaar_front, aadhaar_back; sets kyc_status=submitted + verification_status=pending_verification"
     implemented: true
     working: "NA"
     file: "backend/server.py"
@@ -117,9 +120,9 @@ backend:
     status_history:
       - working: "NA"
         agent: "main"
-        comment: "Hardened OTP flow: 5-min expiry, 3/min rate limit per mobile via otp_log, 5 wrong-code attempts cap, single-use OTP. Needs verification."
+        comment: "Rewrote WorkerKycReq to require all new fields; added field-level validation (email contains @, pincode 6 digits, non-empty city/state/full_address/experience, categories non-empty). Missing photo/live_selfie/aadhaar_front/aadhaar_back returns 400. On success, stores email/full_address/city/state/pincode/experience/photo/live_selfie on user + kyc_docs, and sets kyc_status='submitted', verification_status='pending_verification'."
 
-  - task: "Audit logs for sensitive admin & booking actions"
+  - task: "Auto-assign booking only picks kyc_status=approved workers (removed unsafe last-resort fallback)"
     implemented: true
     working: "NA"
     file: "backend/server.py"
@@ -129,45 +132,9 @@ backend:
     status_history:
       - working: "NA"
         agent: "main"
-        comment: "Added audit() helper writing to db.audit_logs. Wired into KYC approve/reject, booking assign/cancel/start/complete, admin login."
+        comment: "Removed the `db.users.find_one({'role': 'worker'})` last-resort fallback in _auto_assign. A pending / submitted / rejected worker can no longer be auto-assigned to a booking."
 
-  - task: "Worker KYC upload with 5MB JPG/PNG/PDF validation"
-    implemented: true
-    working: "NA"
-    file: "backend/server.py"
-    stuck_count: 0
-    priority: "high"
-    needs_retesting: true
-    status_history:
-      - working: "NA"
-        agent: "main"
-        comment: "validate_doc_base64() enforces data-url MIME allow-list and 5MB cap on aadhaar_front/back & skill cert."
-
-  - task: "Booking lifecycle: create, accept, reject, cancel, start, PIN verify with 5-attempt cap, rate"
-    implemented: true
-    working: "NA"
-    file: "backend/server.py"
-    stuck_count: 0
-    priority: "high"
-    needs_retesting: true
-    status_history:
-      - working: "NA"
-        agent: "main"
-        comment: "Lifecycle endpoints exist; PIN endpoint enforces PIN_MAX_ATTEMPTS=5 then auto-cancels."
-
-  - task: "Admin endpoints: login, dashboard stats, workers list/approve/reject, categories, banners, analytics, chat monitor"
-    implemented: true
-    working: "NA"
-    file: "backend/server.py"
-    stuck_count: 0
-    priority: "high"
-    needs_retesting: true
-    status_history:
-      - working: "NA"
-        agent: "main"
-        comment: "Admin password gate -> JWT, dashboard counts, KYC approvals, CRUD categories/banners, analytics aggregates, chat monitor endpoint."
-
-  - task: "Chat: send + list messages between customer and assigned worker"
+  - task: "GET /api/admin/workers returns all new submitted fields (email, address, city, state, pincode, experience, live_selfie)"
     implemented: true
     working: "NA"
     file: "backend/server.py"
@@ -177,59 +144,81 @@ backend:
     status_history:
       - working: "NA"
         agent: "main"
-        comment: "Messages tied to booking_id; only participants can read/send."
+        comment: "No projection change needed — Mongo returns all fields; verify list + detail responses include the new keys once a worker submits KYC."
+
+  - task: "Worker jobs / earnings endpoints still require kyc_status=approved"
+    implemented: true
+    working: "NA"
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Pre-existing 403 guard in /worker/jobs and /worker/earnings. Please regression-test that a newly-registered worker (kyc_status=pending) gets 403 on both."
 
 frontend:
-  - task: "Customer flow (royal blue theme): login -> OTP -> home -> book -> bookings -> chat -> rate"
+  - task: "Newly registered worker must be sent to /worker-onboarding, NOT /worker-pending"
     implemented: true
     working: "NA"
-    file: "frontend/app/(customer)/*"
+    file: "frontend/app/register.tsx, frontend/app/index.tsx"
     stuck_count: 0
     priority: "high"
     needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
-        comment: "UI verification will be done via screenshot tool, not testing_agent in this pass."
+        comment: "register.tsx + index.tsx now route by kyc_status: pending → /worker-onboarding, submitted → /worker-pending, approved → /(worker)/jobs, rejected → /worker-rejected. UI verification via screenshot tool if needed."
 
-  - task: "Worker flow (dark theme): login -> OTP -> onboarding (Aadhaar) -> jobs dashboard -> earnings"
+  - task: "Worker onboarding form requires all mandatory fields before allowing submit"
     implemented: true
     working: "NA"
-    file: "frontend/app/(worker)/*"
+    file: "frontend/app/worker-onboarding.tsx"
     stuck_count: 0
     priority: "high"
     needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
-        comment: "UI verification will be done via screenshot tool."
+        comment: "Fully rewrote worker-onboarding.tsx with Basic Details / Address / Work Details / Verification sections and required-field validation."
 
-  - task: "Admin web flow: login -> dashboard -> workers/categories/banners/analytics"
+  - task: "(worker) route group blocks non-approved workers from jobs/earnings/profile"
     implemented: true
     working: "NA"
-    file: "frontend/app/admin/*"
+    file: "frontend/app/(worker)/_layout.tsx"
     stuck_count: 0
     priority: "high"
     needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
-        comment: "UI verification will be done via screenshot tool."
+        comment: "Added auth guard in (worker)/_layout.tsx: fetches /auth/me and redirects submitted → /worker-pending, rejected → /worker-rejected, pending → /worker-onboarding, only approved renders tabs."
+
+  - task: "Admin worker detail modal shows all new submitted fields + live selfie"
+    implemented: true
+    working: "NA"
+    file: "frontend/app/admin/workers.tsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Modal now shows Applicant Details card (email/full_address/city/state/pincode/experience) + Live Selfie image + existing Aadhaar images."
 
 metadata:
   created_by: "main_agent"
-  version: "1.2"
-  test_sequence: 3
+  version: "2.0"
+  test_sequence: 4
   run_ui: false
 
 test_plan:
   current_focus:
-    - "Auth: send-otp + verify-otp with mock 123456, 5-min expiry, 3/min rate-limit, 5 attempts cap"
-    - "Audit logs for sensitive admin & booking actions"
-    - "Worker KYC upload with 5MB JPG/PNG/PDF validation"
-    - "Booking lifecycle: create, accept, reject, cancel, start, PIN verify with 5-attempt cap, rate"
-    - "Admin endpoints: login, dashboard stats, workers list/approve/reject, categories, banners, analytics, chat monitor"
-    - "Chat: send + list messages between customer and assigned worker"
+    - "POST /api/worker/upload-kyc requires email, full_address, city, state, pincode (6-digit), experience, categories, profile photo, live_selfie, aadhaar_front, aadhaar_back; sets kyc_status=submitted + verification_status=pending_verification"
+    - "Auto-assign booking only picks kyc_status=approved workers (removed unsafe last-resort fallback)"
+    - "Worker jobs / earnings endpoints still require kyc_status=approved"
+    - "GET /api/admin/workers returns all new submitted fields (email, address, city, state, pincode, experience, live_selfie)"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -237,48 +226,67 @@ test_plan:
 agent_communication:
   - agent: "main"
     message: |
-      Backend security hardening pass complete. Please run full backend regression:
-      - OTP send rate limit (3/min should 429 on 4th), verify with `123456` (mock).
-      - OTP wrong code 5 times -> 429; expiry path (cannot easily wait 5min, just confirm logic on expired doc).
-      - KYC upload: reject non-allowed MIME and >5MB.
-      - Booking lifecycle end-to-end including PIN wrong attempts 5x -> auto cancel.
-      - Admin login with password `admin123`, then dashboard/workers/categories/banners/analytics/chat-monitor.
-      - Verify audit_logs collection has entries after admin and booking actions.
-      Credentials: customer mobile `+919876500001`, worker `+919876500099`, OTP `123456`, admin password `admin123`.
-  - agent: "testing"
-    message: |
-      Iteration 2: 42/45 passed (1 critical bug + 2 gaps). Bug fixed by testing agent:
-      `verify-otp` 500 due to naive/aware datetime compare on expires_at (server.py:262-267).
-      Open gaps reported back to main: (a) admin_login missing audit_log entry, (b) verify-pin
-      did not auto-cancel booking after 5 wrong attempts.
+      Worker registration + verification hardening pass. Backend expects the full
+      onboarding payload before setting kyc_status='submitted'.
+
+      Please run the following backend regression:
+
+      1. **Register a worker (name+mobile only)** via POST /api/auth/register
+         { "name": "New Worker", "mobile": "+919000000010", "role": "worker" }.
+         Expect: user created with kyc_status='pending'.
+
+      2. **Guard: worker cannot reach worker-only endpoints before approval**
+         - GET /api/worker/jobs → 403
+         - GET /api/worker/earnings → 403
+
+      3. **upload-kyc field validation** — using the token from step 1, POST
+         /api/worker/upload-kyc and confirm each of the following returns 400:
+         - missing email / invalid email (no '@')
+         - missing full_address / city / state
+         - pincode non-6-digit or non-numeric
+         - missing experience / categories (empty list)
+         - missing profile photo (`photo`) → 400 "Profile photo is required"
+         - missing live_selfie → 400 "Live selfie is required"
+         - missing aadhaar_front / aadhaar_back → 400
+         - Wrong MIME (e.g. `data:text/plain;base64,...`) → 400
+         - >5MB base64 → 413
+
+      4. **Successful upload-kyc** with valid data (small JPEG base64 for each
+         document) → response has kyc_status='submitted' and
+         verification_status='pending_verification'. GET /api/auth/me confirms
+         the same. Worker still 403 on /worker/jobs and /worker/earnings.
+
+      5. **Admin visibility** — after step 4, log in as admin (password
+         admin123) and GET /api/admin/workers → the new worker row must include
+         email, full_address, city, state, pincode, experience, live_selfie.
+
+      6. **Admin approve** → POST /api/admin/workers/{id}/approve.
+         Worker now: kyc_status='approved', verification_status='approved',
+         verified=true. Worker's token can now hit /worker/jobs (200) and
+         /worker/earnings (200).
+
+      7. **Booking auto-assign safety** — create a fresh category, register a
+         customer, book a service. The auto-assigner MUST NOT pick a
+         non-approved worker. Verify by:
+         - registering a second brand-new worker with the same category
+           chosen via upload-kyc (kyc_status='submitted') and one seeded
+           approved worker with a different category.
+         - Placing a booking under the mismatched category: worker_id should
+           EITHER be the seeded approved worker OR remain unassigned — it must
+           NEVER be the submitted (unapproved) new worker.
+
+      Credentials in /app/memory/test_credentials.md (admin123).
+
+      Notes:
+      - `MONGO_URL` / `DB_NAME` from /app/backend/.env.
+      - Frontend testing NOT requested this pass — backend only.
+      - Skill certificate remains optional.
   - agent: "main"
     message: |
-      Applied two fixes:
-      (a) `audit(admin_id, 'admin_login')` after successful admin login.
-      (b) `verify_pin` auto-cancels booking + writes `booking_cancelled` audit on 5th wrong PIN.
-      Re-run security suite please.
-  - agent: "testing"
-    message: |
-      Iteration 3: 45/45 PASS. No regressions. audit_log entries verified for admin_login,
-      pin_locked, booking_cancelled (meta={reason:'pin_attempts_exceeded', by:'system'}).
-      retest_needed: false.
-  - agent: "main"
-    message: |
-      Frontend visual verification done via screenshot tool:
-      - Customer flow (royal blue): home banner + service grid + bookings + profile OK.
-      - Worker dark theme: applied via workerColors (bg #0F172A, surface #1E293B) — jobs,
-        earnings, profile all confirmed dark.
-      - Admin web: login → dashboard (50 customers / 22 workers / 35 bookings) → workers KYC
-        list with status pills → categories CRUD → analytics chart OK.
-      Backend status: green. UI status: green. Supabase migration plan written to
-      /app/supabase_migration_plan.md (530 lines, includes Mongo→Postgres mapping + rollback).
-  - agent: "testing"
-    message: |
-      Iteration 3 (re-test) complete. Full backend suite 45/45 PASS (100%). Both previously failing tests now green:
-        - test_security.py::TestAdminLogin::test_right_password_returns_admin_jwt  (admin_login audit row written)
-        - test_security.py::TestPinAttempts::test_after_pin_locked_booking_auto_cancelled  (status=cancelled, cancelled_by=system, cancel_reason='PIN attempts exceeded')
-      Direct API verification of audit_logs:
-        - action=admin_login rows present with user_id=<admin id>
-        - action=booking_cancelled with meta={reason:'pin_attempts_exceeded', by:'system'} present
-        - action=pin_locked with meta={attempts:5} present
-      No regressions across the 31-test test_homemate_backend.py suite. No mocks. Run cmd: `pytest /app/backend/tests/ -v --junitxml=/app/test_reports/pytest/pytest_results.xml` (~75s). See /app/test_reports/iteration_3.json for details + remaining optional polish items (PIN cap off-by-one UX, verify-pin missing status check, server.py size, deprecated on_event).
+      NOTE for agent-to-agent context (previous iterations, already fixed):
+      - iteration 3 finished green (45/45) — that suite lives in
+        /app/backend/tests/test_security.py + test_homemate_backend.py. The
+        WorkerKycReq schema changes may break those existing tests since they
+        POST the old shape. If they fail, update them to send the new required
+        payload — this is expected behavior.
+
