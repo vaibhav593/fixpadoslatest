@@ -107,6 +107,15 @@ export default function Profile() {
             <Text style={styles.linkTxt}>Booking History</Text>
             <Ionicons name="chevron-forward" color={colors.textFaint} size={16} />
           </TouchableOpacity>
+          <TouchableOpacity
+            testID="admin-panel-link"
+            onPress={() => router.push("/admin/login")}
+            style={styles.link}
+          >
+            <Ionicons name="settings" color={colors.brand} size={18} />
+            <Text style={styles.linkTxt}>Admin Panel (web)</Text>
+            <Ionicons name="chevron-forward" color={colors.textFaint} size={16} />
+          </TouchableOpacity>
         </View>
 
         <Button testID="logout-button" label="Log out" variant="ghost" icon="log-out" onPress={logout} />
