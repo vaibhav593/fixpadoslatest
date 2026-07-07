@@ -277,7 +277,7 @@ class TestAutoAssignSafety:
         # Customer creates booking under that category
         c = register(session, "customer", "TEST_CustAA")
         br = session.post(f"{API}/bookings", headers=auth(c["token"]), json={
-            "name": "T", "mobile": c["mobile"], "address": "A",
+            "name": "T", "mobile": c["mobile"], "address": "A", "pincode": "400050",
             "category_id": cid, "problem": "x", "schedule_type": "now",
         })
         assert br.status_code == 200, br.text
@@ -322,7 +322,7 @@ class TestBookingLifecycleRegression:
         # Customer + booking
         c = register(session, "customer", "TEST_LifeC")
         br = session.post(f"{API}/bookings", headers=auth(c["token"]), json={
-            "name": "T", "mobile": c["mobile"], "address": "A",
+            "name": "T", "mobile": c["mobile"], "address": "A", "pincode": "400050",
             "category_id": elec["id"], "problem": "x", "schedule_type": "now",
         })
         assert br.status_code == 200, br.text

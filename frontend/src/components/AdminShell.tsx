@@ -11,6 +11,7 @@ const NAV = [
   { route: "/admin/dashboard", label: "Dashboard", icon: "speedometer" },
   { route: "/admin/workers", label: "Workers (KYC)", icon: "people" },
   { route: "/admin/categories", label: "Categories", icon: "grid" },
+  { route: "/admin/service-areas", label: "Service Areas", icon: "map" },
   { route: "/admin/banners", label: "Banners", icon: "image" },
   { route: "/admin/bookings", label: "Bookings", icon: "calendar" },
   { route: "/admin/analytics", label: "Analytics", icon: "bar-chart" },

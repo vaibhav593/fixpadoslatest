@@ -152,6 +152,33 @@ export const api = {
     request(`/admin/bookings/${bid}/assign-worker`, { method: "PATCH", body: { worker_id } }),
   adminAnalytics: () => request<any>("/admin/analytics"),
   adminChat: (bid: string) => request<any[]>(`/admin/chat/${bid}`),
+  // Service Areas
+  checkServiceArea: (pincode: string) =>
+    request<{ serviced: boolean; area?: any }>(
+      `/service-areas/check?pincode=${encodeURIComponent(pincode)}`,
+      { auth: false },
+    ),
+  adminServiceAreas: () => request<any[]>("/admin/service-areas"),
+  adminServiceAreaStats: (id: string) =>
+    request<{ customers: number; bookings: number; workers: number }>(
+      `/admin/service-areas/${id}/stats`,
+    ),
+  adminCreateServiceArea: (body: {
+    name: string;
+    pincode: string;
+    city: string;
+    radius_km?: number | null;
+    enabled: boolean;
+  }) => request<any>("/admin/service-areas", { method: "POST", body }),
+  adminUpdateServiceArea: (id: string, body: Partial<{
+    name: string;
+    pincode: string;
+    city: string;
+    radius_km: number | null;
+    enabled: boolean;
+  }>) => request<any>(`/admin/service-areas/${id}`, { method: "PATCH", body }),
+  adminDeleteServiceArea: (id: string) =>
+    request(`/admin/service-areas/${id}`, { method: "DELETE" }),
   listWorkers: (categoryId?: string) =>
     request<any[]>(`/workers${categoryId ? `?category_id=${categoryId}` : ""}`, { auth: false }),
 };

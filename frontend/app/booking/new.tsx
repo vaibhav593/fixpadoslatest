@@ -31,6 +31,11 @@ export default function NewBooking() {
   const [name, setName] = useState("");
   const [mobile, setMobile] = useState("");
   const [address, setAddress] = useState("");
+  const [pincode, setPincode] = useState("");
+  const [areaStatus, setAreaStatus] = useState<"idle" | "checking" | "ok" | "unavailable" | "invalid">(
+    "idle",
+  );
+  const [areaName, setAreaName] = useState<string>("");
   const [landmark, setLandmark] = useState("");
   const [problem, setProblem] = useState("");
   const [coords, setCoords] = useState<{ lat?: number; lng?: number }>({});
@@ -78,12 +83,37 @@ export default function NewBooking() {
     }
   };
 
+  const checkArea = async (p: string) => {
+    if (p.length !== 6) {
+      setAreaStatus(p.length === 0 ? "idle" : "invalid");
+      setAreaName("");
+      return;
+    }
+    setAreaStatus("checking");
+    try {
+      const res = await api.checkServiceArea(p);
+      if (res.serviced) {
+        setAreaStatus("ok");
+        setAreaName(res.area?.name ? `${res.area.name}, ${res.area.city}` : "");
+      } else {
+        setAreaStatus("unavailable");
+        setAreaName("");
+      }
+    } catch {
+      setAreaStatus("invalid");
+      setAreaName("");
+    }
+  };
+
   const submit = async () => {
     setError("");
     if (!selectedCat) return setError("Pick a category");
     if (!name.trim()) return setError("Enter your name");
     if (!/^[+\d]{8,}$/.test(mobile.trim())) return setError("Enter a valid mobile number");
     if (!address.trim()) return setError("Enter your address");
+    if (!/^\d{6}$/.test(pincode.trim())) return setError("Enter a valid 6-digit pincode");
+    if (areaStatus === "unavailable")
+      return setError("Sorry, services are currently unavailable in your area.");
     if (!problem.trim()) return setError("Describe the issue");
 
     setLoading(true);
@@ -92,6 +122,7 @@ export default function NewBooking() {
         name: name.trim(),
         mobile: mobile.trim(),
         address: address.trim(),
+        pincode: pincode.trim(),
         landmark: landmark.trim(),
         category_id: selectedCat,
         problem: problem.trim(),
@@ -213,6 +244,38 @@ export default function NewBooking() {
           />
         </View>
 
+        {/* Pincode + service-area preflight */}
+        <View>
+          <Text style={styles.label}>Pincode</Text>
+          <TextInput
+            testID="booking-pincode-input"
+            value={pincode}
+            onChangeText={(t) => {
+              const next = t.replace(/\D/g, "").slice(0, 6);
+              setPincode(next);
+              checkArea(next);
+            }}
+            placeholder="6-digit pincode"
+            placeholderTextColor={colors.textFaint}
+            keyboardType="number-pad"
+            maxLength={6}
+            style={styles.input}
+          />
+          {areaStatus === "ok" ? (
+            <Text testID="area-status-ok" style={[styles.help, { color: colors.success }]}>
+              We service this area{areaName ? ` — ${areaName}` : ""}.
+            </Text>
+          ) : null}
+          {areaStatus === "unavailable" ? (
+            <View testID="area-status-unavailable" style={{ marginTop: 6 }}>
+              <Toast type="error" message="Sorry, services are currently unavailable in your area." />
+            </View>
+          ) : null}
+          {areaStatus === "checking" ? (
+            <Text style={styles.help}>Checking availability…</Text>
+          ) : null}
+        </View>
+
         {/* Problem */}
         <View>
           <Text style={styles.label}>Describe the issue</Text>
@@ -312,6 +375,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 18, fontWeight: "800", color: colors.text },
 
   label: { fontSize: 12, fontWeight: "800", color: colors.textMuted, letterSpacing: 0.6, marginBottom: 8 },
+  help: { fontSize: 12, color: colors.textMuted, marginTop: 6 },
   subLabel: { fontSize: 11, fontWeight: "700", color: colors.textMuted, marginBottom: 4 },
   labelRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   locBtn: {

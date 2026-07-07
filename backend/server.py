@@ -174,6 +174,7 @@ class BookingIn(BaseModel):
     name: str
     mobile: str
     address: str
+    pincode: str
     landmark: Optional[str] = ""
     category_id: str
     problem: str
@@ -182,6 +183,22 @@ class BookingIn(BaseModel):
     schedule_type: Literal["now", "later"] = "now"
     time_slot: Optional[str] = None
     scheduled_date: Optional[str] = None
+
+
+class ServiceAreaIn(BaseModel):
+    name: str
+    pincode: str
+    city: str
+    radius_km: Optional[float] = None
+    enabled: bool = True
+
+
+class ServiceAreaPatch(BaseModel):
+    name: Optional[str] = None
+    pincode: Optional[str] = None
+    city: Optional[str] = None
+    radius_km: Optional[float] = None
+    enabled: Optional[bool] = None
 
 
 class ReasonReq(BaseModel):
@@ -338,6 +355,111 @@ async def update_category(cid: str, body: CategoryIn, user=Depends(require_admin
 @api.delete("/categories/{cid}")
 async def delete_category(cid: str, user=Depends(require_admin)):
     await db.categories.delete_one({"id": cid})
+    return {"ok": True}
+
+
+# ────────────────────────────────────────────────────────────────
+# Service areas — admin CRUD + public check
+# ────────────────────────────────────────────────────────────────
+def _validate_pincode(p: str) -> str:
+    p = (p or "").strip()
+    if not p.isdigit() or len(p) != 6:
+        raise HTTPException(400, "Pincode must be a 6-digit number")
+    return p
+
+
+@api.get("/service-areas/check")
+async def service_area_check(pincode: str):
+    """Public endpoint — customer app pre-checks whether a pincode is serviced."""
+    p = _validate_pincode(pincode)
+    area = await _service_area_for_pincode(p)
+    if not area:
+        return {"serviced": False}
+    return {"serviced": True, "area": clean(area)}
+
+
+@api.get("/admin/service-areas")
+async def list_service_areas(user=Depends(require_admin)):
+    items = await db.service_areas.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return [clean(i) for i in items]
+
+
+@api.get("/admin/service-areas/{sid}/stats")
+async def service_area_stats(sid: str, user=Depends(require_admin)):
+    area = await db.service_areas.find_one({"id": sid}, {"_id": 0})
+    if not area:
+        raise HTTPException(404, "Service area not found")
+    customers = await db.users.count_documents({"role": "customer", "pincode": area["pincode"]})
+    bookings = await db.bookings.count_documents({"pincode": area["pincode"]})
+    workers = await db.users.count_documents({"role": "worker", "pincode": area["pincode"]})
+    return {"customers": customers, "bookings": bookings, "workers": workers}
+
+
+@api.post("/admin/service-areas")
+async def create_service_area(body: ServiceAreaIn, user=Depends(require_admin)):
+    p = _validate_pincode(body.pincode)
+    name = (body.name or "").strip()
+    city = (body.city or "").strip()
+    if not name:
+        raise HTTPException(400, "Name is required")
+    if not city:
+        raise HTTPException(400, "City is required")
+    existing = await db.service_areas.find_one({"pincode": p})
+    if existing:
+        raise HTTPException(400, f"A service area for pincode {p} already exists")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "pincode": p,
+        "city": city,
+        "radius_km": body.radius_km,
+        "enabled": body.enabled,
+        "created_at": now_utc(),
+        "updated_at": now_utc(),
+    }
+    await db.service_areas.insert_one(doc.copy())
+    await audit(user["id"], "service_area_created", doc["id"], {"name": name, "pincode": p})
+    return clean(doc)
+
+
+@api.patch("/admin/service-areas/{sid}")
+async def update_service_area(sid: str, body: ServiceAreaPatch, user=Depends(require_admin)):
+    area = await db.service_areas.find_one({"id": sid}, {"_id": 0})
+    if not area:
+        raise HTTPException(404, "Service area not found")
+    update: dict = {"updated_at": now_utc()}
+    if body.name is not None:
+        n = body.name.strip()
+        if not n:
+            raise HTTPException(400, "Name cannot be empty")
+        update["name"] = n
+    if body.pincode is not None:
+        p = _validate_pincode(body.pincode)
+        clash = await db.service_areas.find_one({"pincode": p, "id": {"$ne": sid}})
+        if clash:
+            raise HTTPException(400, f"A service area for pincode {p} already exists")
+        update["pincode"] = p
+    if body.city is not None:
+        c = body.city.strip()
+        if not c:
+            raise HTTPException(400, "City cannot be empty")
+        update["city"] = c
+    if body.radius_km is not None:
+        update["radius_km"] = body.radius_km
+    if body.enabled is not None:
+        update["enabled"] = body.enabled
+    await db.service_areas.update_one({"id": sid}, {"$set": update})
+    await audit(user["id"], "service_area_updated", sid, update)
+    out = await db.service_areas.find_one({"id": sid}, {"_id": 0})
+    return clean(out)
+
+
+@api.delete("/admin/service-areas/{sid}")
+async def delete_service_area(sid: str, user=Depends(require_admin)):
+    res = await db.service_areas.delete_one({"id": sid})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Service area not found")
+    await audit(user["id"], "service_area_deleted", sid)
     return {"ok": True}
 
 
@@ -569,22 +691,36 @@ async def worker_resubmit(user=Depends(get_current_user)):
 
 
 # ----------------- Bookings -----------------
-async def _auto_assign(booking: dict):
-    """Pick an approved+available worker for the category.
+async def _service_area_for_pincode(pincode: str) -> Optional[dict]:
+    """Return the enabled service area matching this pincode, else None."""
+    return await db.service_areas.find_one(
+        {"pincode": pincode, "enabled": True}, {"_id": 0}
+    )
 
-    Only workers with `kyc_status == "approved"` are ever considered — a
-    pending / rejected / incomplete-profile worker can never receive a booking.
+
+async def _auto_assign(booking: dict):
+    """Pick an approved worker for the category **inside the same service area**.
+
+    Rules:
+    - Only workers with `kyc_status == "approved"` are ever considered.
+    - The worker's stored `pincode` MUST equal the booking's `pincode` (no cross-area assignment).
     """
+    booking_pincode = booking.get("pincode")
+    if not booking_pincode:
+        return None
+
+    filters_base = {"role": "worker", "kyc_status": "approved", "pincode": booking_pincode}
+
     worker = await db.users.find_one(
-        {"role": "worker", "categories": booking["category_id"], "available": True, "kyc_status": "approved"},
+        {**filters_base, "categories": booking["category_id"], "available": True},
         {"_id": 0},
     )
     if not worker:
         worker = await db.users.find_one(
-            {"role": "worker", "categories": booking["category_id"], "kyc_status": "approved"}, {"_id": 0}
+            {**filters_base, "categories": booking["category_id"]}, {"_id": 0}
         )
     if not worker:
-        worker = await db.users.find_one({"role": "worker", "kyc_status": "approved"}, {"_id": 0})
+        worker = await db.users.find_one(filters_base, {"_id": 0})
     if not worker:
         return None
     await db.bookings.update_one(
@@ -603,6 +739,14 @@ async def create_booking(body: BookingIn, user=Depends(get_current_user)):
     category = await db.categories.find_one({"id": body.category_id}, {"_id": 0})
     if not category:
         raise HTTPException(400, "Invalid category")
+    # ---- Service area gate ----
+    pincode = (body.pincode or "").strip()
+    if not pincode.isdigit() or len(pincode) != 6:
+        raise HTTPException(400, "Please enter a valid 6-digit pincode")
+    area = await _service_area_for_pincode(pincode)
+    if not area:
+        raise HTTPException(400, "Sorry, services are currently unavailable in your area.")
+
     pin = "".join(random.choices(string.digits, k=4))
     booking = {
         "id": str(uuid.uuid4()),
@@ -612,6 +756,8 @@ async def create_booking(body: BookingIn, user=Depends(get_current_user)):
         "name": body.name,
         "mobile": body.mobile,
         "address": body.address,
+        "pincode": pincode,
+        "service_area_id": area["id"],
         "landmark": body.landmark,
         "category_id": body.category_id,
         "category_name": category["name"],
@@ -1141,6 +1287,13 @@ async def seed_db():
         {"$set": {"kyc_status": "approved", "kyc_docs": {}, "rejection_reason": None}},
     )
 
+    # Migrate seeded demo workers missing pincode (pre-service-areas seed).
+    await db.users.update_many(
+        {"role": "worker", "mobile": {"$in": ["999990001", "999990002", "999990003"]},
+         "pincode": {"$exists": False}},
+        {"$set": {"pincode": "400050"}},
+    )
+
     # Migrate workers missing verification fields (verification system rollout).
     async for w in db.users.find({"role": "worker", "verification_status": {"$exists": False}}, {"_id": 0}):
         ks = w.get("kyc_status", "pending")
@@ -1170,6 +1323,19 @@ async def seed_db():
             "created_at": now_utc(),
         })
         logger.info("Seeded default banner")
+
+    if await db.service_areas.count_documents({}) == 0:
+        await db.service_areas.insert_one({
+            "id": str(uuid.uuid4()),
+            "name": "Bandra West",
+            "pincode": "400050",
+            "city": "Mumbai",
+            "radius_km": 5.0,
+            "enabled": True,
+            "created_at": now_utc(),
+            "updated_at": now_utc(),
+        })
+        logger.info("Seeded default service area (Bandra West / 400050)")
 
 
 app.include_router(api)

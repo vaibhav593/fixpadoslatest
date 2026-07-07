@@ -97,134 +97,113 @@
 #====================================================================================================
 
 user_problem_statement: |
-  Fix Worker Registration & Verification flow: workers must NOT reach the pending
-  verification page after only entering Name + Mobile. They must first fill:
-  - Basic Details (Full Name, Mobile, Email)
-  - Address (Full Address, City, State, Pincode)
-  - Work Details (Service Category, Experience)
-  - Verification (Profile Photo, Live Selfie, Aadhaar Front, Aadhaar Back)
-  Only after all these are submitted should the status become "pending_verification".
-  Admin can view all submitted details + images and Approve / Reject.
-  Only approved workers can access jobs / earnings / go online. Pending/rejected
-  workers cannot receive bookings. Bookings must NEVER be assigned to a
-  non-approved worker.
+  Add Service Area Control for Admin. Admin can Create/Edit/Enable/Disable
+  Service Areas (name, pincode, city, radius_km optional). Booking must be
+  blocked unless the customer's pincode matches an enabled service area with
+  the exact 400 message "Sorry, services are currently unavailable in your
+  area." Workers only receive orders from approved service areas — auto-assign
+  must never assign a job to a worker whose pincode is outside the booking's
+  service area. Admin can also see per-area counts of customers / bookings /
+  workers. Service Areas live INSIDE the existing admin section.
 
 backend:
-  - task: "POST /api/worker/upload-kyc requires email, full_address, city, state, pincode (6-digit), experience, categories, profile photo, live_selfie, aadhaar_front, aadhaar_back; sets kyc_status=submitted + verification_status=pending_verification"
+  - task: "POST /api/bookings requires `pincode` (6-digit) and rejects with 400 'Sorry, services are currently unavailable in your area.' when the pincode has no enabled service area"
     implemented: true
-    working: true
+    working: "NA"
     file: "backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: false
+    needs_retesting: true
     status_history:
       - working: "NA"
         agent: "main"
-        comment: "Rewrote WorkerKycReq to require all new fields; added field-level validation."
-      - working: true
-        agent: "testing"
-        comment: "iteration 4 — 27/27 pass. All field 400s + MIME/size limits verified. Valid submission flips kyc_status='submitted' + verification_status='pending_verification' and every field persists."
+        comment: "BookingIn now includes required `pincode`. create_booking validates 6-digit numeric pincode, looks up an enabled service_area via `_service_area_for_pincode`; if missing/disabled, 400 with the exact message above. On success, stores `pincode` + `service_area_id` on the booking."
 
-  - task: "Auto-assign booking only picks kyc_status=approved workers (removed unsafe last-resort fallback)"
+  - task: "Public GET /api/service-areas/check?pincode=XXXXXX returns { serviced, area? }"
     implemented: true
-    working: true
+    working: "NA"
     file: "backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: false
+    needs_retesting: true
     status_history:
       - working: "NA"
         agent: "main"
-        comment: "Removed the `db.users.find_one({'role': 'worker'})` last-resort fallback."
-      - working: true
-        agent: "testing"
-        comment: "iteration 4 — isolation scenario confirms a 'submitted' (unapproved) worker is never picked; booking.worker_id was null."
+        comment: "Public unauthenticated endpoint. 400 on non-6-digit / non-numeric pincode. serviced=false when no enabled area exists; serviced=true with the area document when one exists."
 
-  - task: "GET /api/admin/workers returns all new submitted fields (email, address, city, state, pincode, experience, live_selfie)"
+  - task: "Admin CRUD: GET/POST/PATCH/DELETE /api/admin/service-areas + GET /api/admin/service-areas/{id}/stats"
     implemented: true
-    working: true
+    working: "NA"
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Full admin CRUD guarded by require_admin. Uniqueness: cannot create two areas with the same pincode; PATCH pincode conflict returns 400. Stats endpoint returns { customers, bookings, workers } counted by matching pincode."
+
+  - task: "Auto-assign restricted to workers whose pincode == booking.pincode AND kyc_status == approved (no cross-area assignment)"
+    implemented: true
+    working: "NA"
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "_auto_assign now filters by booking pincode. An approved worker in a different pincode is NEVER assigned. Only approved workers are ever considered — pending/rejected still excluded (from iteration 4)."
+
+  - task: "Seed default service area (Bandra West / 400050 / Mumbai / radius 5km / enabled) so the seeded demo workers (pincode 400050) can pick up bookings"
+    implemented: true
+    working: "NA"
     file: "backend/server.py"
     stuck_count: 0
     priority: "medium"
-    needs_retesting: false
+    needs_retesting: true
     status_history:
-      - working: true
-        agent: "testing"
-        comment: "iteration 4 — every new field visible on the admin listing + detail."
-
-  - task: "Worker jobs / earnings endpoints still require kyc_status=approved"
-    implemented: true
-    working: true
-    file: "backend/server.py"
-    stuck_count: 0
-    priority: "high"
-    needs_retesting: false
-    status_history:
-      - working: true
-        agent: "testing"
-        comment: "iteration 4 — 403 for pending/submitted/rejected; 200 only after admin approves."
+      - working: "NA"
+        agent: "main"
+        comment: "Seeded on startup if the service_areas collection is empty."
 
 frontend:
-  - task: "Newly registered worker must be sent to /worker-onboarding, NOT /worker-pending"
+  - task: "Customer booking form asks for pincode + preflight service-area check + inline 'unavailable' message"
     implemented: true
     working: "NA"
-    file: "frontend/app/register.tsx, frontend/app/index.tsx"
+    file: "frontend/app/booking/new.tsx"
     stuck_count: 0
     priority: "high"
     needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
-        comment: "register.tsx + index.tsx now route by kyc_status: pending → /worker-onboarding, submitted → /worker-pending, approved → /(worker)/jobs, rejected → /worker-rejected. UI verification via screenshot tool if needed."
+        comment: "Added pincode input (testID=booking-pincode-input); on 6-digit input, calls /service-areas/check and either shows green 'we service this area' or the required error toast (testID=area-status-unavailable). Submit is blocked when unavailable."
 
-  - task: "Worker onboarding form requires all mandatory fields before allowing submit"
+  - task: "New admin route /admin/service-areas with list + add/edit modal + enable/disable switch + delete + stats"
     implemented: true
     working: "NA"
-    file: "frontend/app/worker-onboarding.tsx"
+    file: "frontend/app/admin/service-areas.tsx, frontend/src/components/AdminShell.tsx"
     stuck_count: 0
     priority: "high"
     needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
-        comment: "Fully rewrote worker-onboarding.tsx with Basic Details / Address / Work Details / Verification sections and required-field validation."
-
-  - task: "(worker) route group blocks non-approved workers from jobs/earnings/profile"
-    implemented: true
-    working: "NA"
-    file: "frontend/app/(worker)/_layout.tsx"
-    stuck_count: 0
-    priority: "high"
-    needs_retesting: false
-    status_history:
-      - working: "NA"
-        agent: "main"
-        comment: "Added auth guard in (worker)/_layout.tsx: fetches /auth/me and redirects submitted → /worker-pending, rejected → /worker-rejected, pending → /worker-onboarding, only approved renders tabs."
-
-  - task: "Admin worker detail modal shows all new submitted fields + live selfie"
-    implemented: true
-    working: "NA"
-    file: "frontend/app/admin/workers.tsx"
-    stuck_count: 0
-    priority: "medium"
-    needs_retesting: false
-    status_history:
-      - working: "NA"
-        agent: "main"
-        comment: "Modal now shows Applicant Details card (email/full_address/city/state/pincode/experience) + Live Selfie image + existing Aadhaar images."
+        comment: "New screen + nav entry in AdminShell. Toggle instantly PATCHes enabled. Add/Edit modal supports name/pincode/city/radius_km/enabled. Per-row stats show customers/bookings/workers."
 
 metadata:
   created_by: "main_agent"
-  version: "2.0"
-  test_sequence: 4
+  version: "3.0"
+  test_sequence: 5
   run_ui: false
 
 test_plan:
   current_focus:
-    - "POST /api/worker/upload-kyc requires email, full_address, city, state, pincode (6-digit), experience, categories, profile photo, live_selfie, aadhaar_front, aadhaar_back; sets kyc_status=submitted + verification_status=pending_verification"
-    - "Auto-assign booking only picks kyc_status=approved workers (removed unsafe last-resort fallback)"
-    - "Worker jobs / earnings endpoints still require kyc_status=approved"
-    - "GET /api/admin/workers returns all new submitted fields (email, address, city, state, pincode, experience, live_selfie)"
+    - "POST /api/bookings requires `pincode` (6-digit) and rejects with 400 'Sorry, services are currently unavailable in your area.' when the pincode has no enabled service area"
+    - "Public GET /api/service-areas/check?pincode=XXXXXX returns { serviced, area? }"
+    - "Admin CRUD: GET/POST/PATCH/DELETE /api/admin/service-areas + GET /api/admin/service-areas/{id}/stats"
+    - "Auto-assign restricted to workers whose pincode == booking.pincode AND kyc_status == approved (no cross-area assignment)"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -232,93 +211,55 @@ test_plan:
 agent_communication:
   - agent: "main"
     message: |
-      Worker registration + verification hardening pass. Backend expects the full
-      onboarding payload before setting kyc_status='submitted'.
+      Iteration 5 — Service Area enforcement pass. Backend-only regression
+      requested.
 
-      Please run the following backend regression:
+      Please verify:
 
-      1. **Register a worker (name+mobile only)** via POST /api/auth/register
-         { "name": "New Worker", "mobile": "+919000000010", "role": "worker" }.
-         Expect: user created with kyc_status='pending'.
+      1. **Seed area exists**: on startup the DB has a single service area for
+         pincode 400050 ("Bandra West", Mumbai, enabled).
 
-      2. **Guard: worker cannot reach worker-only endpoints before approval**
-         - GET /api/worker/jobs → 403
-         - GET /api/worker/earnings → 403
+      2. **Public check endpoint**:
+         - GET /api/service-areas/check?pincode=400050 → { serviced: true, area: {...} }
+         - GET /api/service-areas/check?pincode=999999 → { serviced: false }
+         - GET /api/service-areas/check?pincode=12345 → 400 (invalid pincode)
+         - No auth token needed.
 
-      3. **upload-kyc field validation** — using the token from step 1, POST
-         /api/worker/upload-kyc and confirm each of the following returns 400:
-         - missing email / invalid email (no '@')
-         - missing full_address / city / state
-         - pincode non-6-digit or non-numeric
-         - missing experience / categories (empty list)
-         - missing profile photo (`photo`) → 400 "Profile photo is required"
-         - missing live_selfie → 400 "Live selfie is required"
-         - missing aadhaar_front / aadhaar_back → 400
-         - Wrong MIME (e.g. `data:text/plain;base64,...`) → 400
-         - >5MB base64 → 413
+      3. **Admin CRUD**:
+         - Non-admin (customer/worker token) hitting /api/admin/service-areas* → 403.
+         - Admin (password admin123) can:
+             a) GET /api/admin/service-areas → includes the seeded area.
+             b) POST a new area (unique pincode, e.g. 560001, "Bengaluru Central", city=Bengaluru, radius_km=8, enabled=true) → 200 with the area doc.
+             c) POST again with the same pincode → 400 "already exists".
+             d) POST with name empty / city empty / pincode non-6-digit → 400.
+             e) PATCH the new area to enabled=false → GET reflects the change.
+             f) PATCH to change pincode to an existing pincode (400050) → 400.
+             g) GET /admin/service-areas/{id}/stats → { customers, bookings, workers } as integers.
+             h) DELETE the new area → 200 and it disappears from GET list.
 
-      4. **Successful upload-kyc** with valid data (small JPEG base64 for each
-         document) → response has kyc_status='submitted' and
-         verification_status='pending_verification'. GET /api/auth/me confirms
-         the same. Worker still 403 on /worker/jobs and /worker/earnings.
+      4. **Booking service-area gate** (as customer):
+         - Register a fresh customer, book under a valid category:
+             POST /bookings with pincode="400050" → 200, booking has pincode & service_area_id set. Auto-assign picks the seeded approved worker (pincode 400050).
+             POST /bookings with pincode="999999" → 400 with EXACT body detail = "Sorry, services are currently unavailable in your area."
+             POST /bookings with pincode="12345" (5 digits) → 400 "Please enter a valid 6-digit pincode".
+             POST /bookings without pincode field → 422 (missing required field).
 
-      5. **Admin visibility** — after step 4, log in as admin (password
-         admin123) and GET /api/admin/workers → the new worker row must include
-         email, full_address, city, state, pincode, experience, live_selfie.
+      5. **Cross-area assignment safety**:
+         - Create a NEW admin-approved worker with pincode="560001" and categories that include some existing category id C (either register+upload-kyc then admin approve, or seed directly via the API path).
+         - Add & enable a service area for 560001.
+         - As a customer, POST /bookings with pincode="560001" and category=C.
+         - The booking's worker_id MUST be the 560001 worker, NEVER the 400050 seeded worker (they must not cross service areas).
+         - Now DISABLE the 560001 area via admin PATCH (enabled=false). Any subsequent POST /bookings with pincode="560001" → 400 "Sorry, services are currently unavailable in your area." (Existing booking not affected.)
 
-      6. **Admin approve** → POST /api/admin/workers/{id}/approve.
-         Worker now: kyc_status='approved', verification_status='approved',
-         verified=true. Worker's token can now hit /worker/jobs (200) and
-         /worker/earnings (200).
-
-      7. **Booking auto-assign safety** — create a fresh category, register a
-         customer, book a service. The auto-assigner MUST NOT pick a
-         non-approved worker. Verify by:
-         - registering a second brand-new worker with the same category
-           chosen via upload-kyc (kyc_status='submitted') and one seeded
-           approved worker with a different category.
-         - Placing a booking under the mismatched category: worker_id should
-           EITHER be the seeded approved worker OR remain unassigned — it must
-           NEVER be the submitted (unapproved) new worker.
+      6. **Regression**:
+         - Full booking lifecycle (create → accept → start → verify-pin → rate) still works when service area is enabled.
+         - Worker KYC upload / approve / reject flow (from iteration 4) still passes.
 
       Credentials in /app/memory/test_credentials.md (admin123).
-
       Notes:
       - `MONGO_URL` / `DB_NAME` from /app/backend/.env.
-      - Frontend testing NOT requested this pass — backend only.
-      - Skill certificate remains optional.
-  - agent: "main"
-    message: |
-      NOTE for agent-to-agent context (previous iterations, already fixed):
-      - iteration 3 finished green (45/45) — that suite lives in
-        /app/backend/tests/test_security.py + test_homemate_backend.py. The
-        WorkerKycReq schema changes may break those existing tests since they
-        POST the old shape. If they fail, update them to send the new required
-        payload — this is expected behavior.
-  - agent: "testing"
-    message: |
-      Iteration 4: 27/27 PASS. All 13 requested behaviors verified against the
-      live backend.
-      - Fresh worker registration → kyc_status='pending', worker endpoints 403.
-      - upload-kyc field-level 400s for missing/invalid: email, full_address,
-        city, state, pincode (non-6-digit / non-numeric), experience, empty
-        categories, photo, live_selfie, aadhaar_front, aadhaar_back.
-      - Document validation: wrong MIME → 400; >5MB → 413.
-      - Valid submission → kyc_status='submitted', verification_status=
-        'pending_verification'; every field persists in /auth/me. Worker still
-        403 on /worker/jobs and /worker/earnings.
-      - Admin login OK; /admin/workers exposes email, full_address, city,
-        state, pincode, experience, live_selfie, photo, kyc_docs.
-      - Approve → kyc_status='approved', verification_status='approved',
-        verified=true; worker endpoints 200.
-      - Reject → kyc_status='rejected'; worker endpoints 403 again.
-      - Auto-assign safety verified: a submitted (unapproved) worker is NEVER
-        auto-assigned; booking.worker_id was null in the isolation scenario.
-      - Categories CRUD + full booking lifecycle regression pass.
-      New suite: /app/backend/tests/test_worker_kyc_verification.py.
-      Report: /app/test_reports/iteration_4.json.
-      test_security.py and test_fixpados_backend.py renamed to `.obsolete`
-      because they targeted the removed OTP endpoints & the old KYC shape
-      (main-agent-approved via the review-request note).
-      retest_needed: false.
+      - Frontend testing NOT requested this pass.
+      - Existing iteration-4 test suite `test_worker_kyc_verification.py` sends
+        upload-kyc calls; those tests continue to be relevant but do not test
+        service areas. The two `.obsolete` files can be ignored.
 
