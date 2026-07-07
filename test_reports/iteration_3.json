@@ -1,0 +1,51 @@
+{
+  "summary": "Re-tested HomeMate backend after main agent applied the two iteration-2 fixes. Full suite of 45 tests now passes (100%) - both previously failing assertions are now green: TestAdminLogin::test_right_password_returns_admin_jwt (audit_log entry written on admin_login) and TestPinAttempts::test_after_pin_locked_booking_auto_cancelled (booking auto-cancels with status='cancelled', cancelled_by='system', cancel_reason='PIN attempts exceeded'). Direct DB-via-API verification confirms audit_logs collection contains action='admin_login' rows with the admin user_id, and action='booking_cancelled' with meta.reason='pin_attempts_exceeded' / by='system', plus a paired action='pin_locked' row with meta.attempts=5. No regressions in the 31-test test_homemate_backend.py suite. No mocks used.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/bookings/{bid}/verify-pin",
+        "issue": "Off-by-one in user-facing UX (subjective, unchanged from iteration 2): pin_attempts is incremented BEFORE the cap check, so the 5th wrong attempt itself returns 429 (worker effectively gets 4 chances). Spec language '5-attempt cap' is consistent with this; either move the increment after the cap check (so 5 wrong attempts each return 400 and the 6th locks) or document explicitly."
+      },
+      {
+        "endpoint": "POST /api/bookings/{bid}/verify-pin",
+        "issue": "Endpoint still does NOT check that booking.status == 'in_progress' before accepting a PIN. A worker could complete a booking from worker_assigned without calling /start. Carry-over from iteration 2 review."
+      },
+      {
+        "endpoint": "POST /api/auth/admin-login",
+        "issue": "Admin user is created lazily with mobile='admin' and re-used across all admin sessions. Acceptable for MVP single-admin model but should be flagged if multi-ops accounts are introduced."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_homemate_backend.py",
+    "/app/backend/tests/test_security.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "No blocking actions. Optional polish (carry-over): (a) reorder pin_attempts increment vs cap check for cleaner UX semantics, (b) verify booking.status=='in_progress' before accepting PIN, (c) consider tz_aware=True on the motor client to eliminate the naive/aware risk class globally, (d) split server.py (~1080 lines) into auth/bookings/admin routers, (e) migrate @app.on_event startup/shutdown to FastAPI lifespan context manager."
+  ],
+  "critical_code_review_comments": [
+    "verify-pin auto-cancel branch correctly writes the booking update AND two audit rows (pin_locked + booking_cancelled) AND notifies the customer. Worker is NOT notified - consider adding `await _push_notification(b['worker_id'], ...)` for symmetry.",
+    "audit('booking_cancelled', actor=None, ...) uses None as user_id, which is fine semantically (system actor) but inconsistent with how a manual cancel records the cancelling user. Acceptable.",
+    "Field name in audit-logs API response is `user_id` and `timestamp`, while audit() helper takes (user_id, action, target_id, meta). Field naming is consistent; iteration-2 report's reference to actor_id was just my paraphrasing.",
+    "server.py still ~1080 lines. Refactor recommended.",
+    "@app.on_event still in use; migrate to lifespan."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (45/45)",
+    "frontend": "skipped (backend-only request)"
+  },
+  "seed_data_creation": "None persisted intentionally. Tests use random TEST_-prefixed mobiles; categories created by CRUD test are deleted in the same test. Bookings + audit log rows generated during the run remain in DB (isolated by random UUID).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend URL from EXPO_PUBLIC_BACKEND_URL in /app/frontend/.env. Mock OTP accepts 123456 for any mobile. Seeded workers at mobiles 999990001/999990002/999990003 (already approved). OTP rate-limit is 3/min/mobile - tests use random mobiles to avoid pollution; helper retries once with 62s sleep on 429. PIN cap: 5th wrong attempt returns 429 AND now auto-cancels the booking (audit rows: pin_locked + booking_cancelled with meta.reason='pin_attempts_exceeded'). Admin login now writes an admin_login audit row. Re-run: `pytest /app/backend/tests/ -v --junitxml=/app/test_reports/pytest/pytest_results.xml` (~75s).",
+  "rca_of_issue": "N/A - this iteration verified main agent's fixes. Both target behaviors are now backed by code at server.py:325 (admin_login audit) and server.py:732-746 (verify-pin auto-cancel + dual audit rows). Direct API spot-check (`GET /api/admin/audit-logs`) confirms entries exist with the expected action/meta values."
+}

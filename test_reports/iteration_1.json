@@ -1,0 +1,68 @@
+{
+  "summary": "Backend-only testing for HomeMate. Wrote pytest suite (31 tests) covering Auth (OTP send/verify/me, 401 paths), Categories (seed + CRUD), full Booking lifecycle (create -> auto-assign -> accept -> start -> verify-pin (wrong + correct) -> rate), worker endpoints (/worker/jobs forbidden for customer, /worker/earnings shape, PIN hidden from worker views), Chat (send/list/since/permission), Notifications, Addresses (scoping), Profile (allowed fields only), Cancellation. 31/31 pass against the public EXPO_PUBLIC_BACKEND_URL. Discovered a latent bug in GET /api/chat/{bid}/messages?since=<iso>: when the '+' in '+00:00' is not URL-encoded, FastAPI decodes it as space, datetime.fromisoformat throws, and the server silently swallows the exception (try/except: pass) - returning ALL messages unfiltered. Recommend hardening since parsing.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/chat/{bid}/messages?since=...",
+        "issue": "since parsing silently swallows errors via `except Exception: pass`. If client passes raw '+' (e.g. `+00:00`), it is decoded as space, fromisoformat fails, and ALL messages are returned (no filtering). Either accept the URL-encoded form proactively (replace ' ' with '+'), return 400 on parse failure, or document that callers must URL-encode. server.py:511-515."
+      },
+      {
+        "endpoint": "POST /api/categories, PATCH /api/categories/{cid}, DELETE /api/categories/{cid}",
+        "issue": "Admin-only routes per the spec, but actually accept any authenticated user (POST) and require NO auth at all (PATCH/DELETE). The comment in code even says `# Allow any authed user in dev for demo simplicity`. Spec says these should be admin. server.py:231-253."
+      },
+      {
+        "endpoint": "PATCH /api/bookings/{bid}/cancel",
+        "issue": "No ownership check. Any authenticated user (not just the booking customer or assigned worker) can cancel any booking by ID. Should verify user is customer_id or worker_id of the booking. server.py:396-412."
+      },
+      {
+        "endpoint": "POST /api/bookings/{bid}/rate",
+        "issue": "Worker rating running average uses fixed weight (cur*9 + stars)/10 instead of actual rating count, so ratings drift unrealistically (a 5-star worker who gets one 1-star rating drops to 4.6 immediately, but won't reflect reality after many ratings). Consider storing rating_count and computing proper average."
+      },
+      {
+        "endpoint": "Seed workers mobile mismatch",
+        "issue": "test_credentials.md says seeded worker mobiles are `99999001/99999002/99999003`, but server.py:645 actually seeds `999990001/999990002/999990003` (extra digit). Update credentials doc to match."
+      },
+      {
+        "endpoint": "Booking create -> auto-assign category match",
+        "issue": "_auto_assign first tries workers with `categories: booking.category_id`. Seeded workers store categories by ID, but customers can request any category. If no worker matches the category, code falls back to ANY worker, even unavailable ones (no `available: True` filter on fallback). server.py:288-297."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_homemate_backend.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Fix chat `since` filter: replace `try/except: pass` with explicit parsing that accepts URL-encoded ISO strings; consider doing `since = since.replace(' ', '+')` defensively before fromisoformat, or return 400 on bad input.",
+    "Add admin-role guard on POST/PATCH/DELETE /api/categories (currently any authed user can POST, and PATCH/DELETE require no auth at all).",
+    "Add ownership check on PATCH /api/bookings/{bid}/cancel (only booking customer or assigned worker).",
+    "Fix seeded worker mobile in test_credentials.md (server seeds 999990001-3, doc says 99999001-3).",
+    "Optional: store rating_count for proper average; ensure auto-assign fallback also filters `available: True`."
+  ],
+  "critical_code_review_comments": [
+    "logger is referenced in send_otp (line 166) and seed_db before `logger = logging.getLogger(__name__)` is defined (line 674). This works because endpoints execute later, but startup seed_db() logging may fail if logger isn't yet defined at module import time. Move logger init to top of file.",
+    "server.py is 685 lines - within the 700 line guideline but split into modules (auth, bookings, chat, notifications, addresses) would improve maintainability as features grow.",
+    "@app.on_event is deprecated in FastAPI; should migrate to lifespan context managers.",
+    "CORS allows all origins with credentials=True - acceptable for dev but should be tightened for prod."
+  ],
+  "updated_files": [
+    "/app/backend/tests/__init__.py (new)",
+    "/app/backend/tests/test_homemate_backend.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (31/31)",
+    "frontend": "skipped"
+  },
+  "seed_data_creation": "None persisted. Test users use TEST_-prefixed names and random Indian mobile numbers; categories created in CRUD test are deleted within the same test. Bookings/messages remain in DB but are isolated by random UUID and won't interfere.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend URL is read from EXPO_PUBLIC_BACKEND_URL in /app/frontend/.env. Mock OTP accepts 123456 for any mobile. Seeded workers are at mobiles 999990001/999990002/999990003 (NOT 99999001-3 as test_credentials.md says). The booking auto-assign happens synchronously inside POST /api/bookings, so the returned booking already has status='worker_assigned' and a worker_id. completion_pin is 4 digits and visible only to the customer. Use params={'since': iso} (not f-string interpolation) when calling GET /api/chat/.../messages so '+' is properly URL-encoded. All 31 backend tests pass.",
+  "rca_of_issue": "Chat since-filter failure RCA: HTTP query strings decode '+' as space (per application/x-www-form-urlencoded). Customer ISO timestamps like `2026-06-03T18:25:11.123+00:00` arrive at the server as `2026-06-03T18:25:11.123 00:00`. The code at server.py:511-515 calls `datetime.fromisoformat(since.replace('Z', '+00:00'))` which throws on the space, and the bare `except Exception: pass` silently drops the filter. Fix: defensively do `since = since.replace(' ', '+')` BEFORE fromisoformat, or raise HTTPException(400) on parse failure so clients learn they need %2B. Reproduce: curl 'BASE/api/chat/{bid}/messages?since=2026-01-01T00:00:00+00:00' -H 'Authorization: Bearer ...' returns all messages regardless of since."
+}

@@ -1,0 +1,116 @@
+{
+  "project_context": {
+    "app_type": "hybrid_fullstack",
+    "platform": "React Native Expo",
+    "theme": "LIGHT",
+    "archetype": "1_TRUST_BLUE",
+    "domain": "Hyperlocal Home Services",
+    "vibe": "Premium, modern, Indian-market, trustworthy"
+  },
+  "typography": {
+    "primary_font": "Outfit",
+    "secondary_font": "DM Sans",
+    "banned_fonts": [
+      "Inter (for headings)",
+      "Roboto",
+      "Open Sans"
+    ],
+    "scale": {
+      "h1": "text-3xl font-bold tracking-tight text-slate-900",
+      "h2": "text-2xl font-bold tracking-tight text-slate-900",
+      "h3": "text-xl font-semibold tracking-tight text-slate-800",
+      "body": "text-base font-normal text-slate-600 leading-relaxed",
+      "caption": "text-sm font-medium text-slate-500",
+      "label": "text-xs font-bold uppercase tracking-widest text-slate-400"
+    }
+  },
+  "colors": {
+    "brand": {
+      "primary": "#2563EB",
+      "primary_light": "#DBEAFE",
+      "primary_dark": "#1E3A8A",
+      "gradient": {
+        "start": "#1E3A8A",
+        "end": "#3B82F6"
+      }
+    },
+    "neutral": {
+      "background": "#F8FAFC",
+      "surface": "#FFFFFF",
+      "border": "#E2E8F0",
+      "text_main": "#0F172A",
+      "text_muted": "#64748B"
+    },
+    "status": {
+      "success": "#10B981",
+      "warning": "#F59E0B",
+      "error": "#EF4444",
+      "info": "#3B82F6"
+    }
+  },
+  "layout_and_spacing": {
+    "container": "px-4 pt-6 pb-24",
+    "bento_grid": {
+      "gap": "gap-4",
+      "columns": "flex-row flex-wrap justify-between"
+    },
+    "card": {
+      "radius": "rounded-2xl",
+      "padding": "p-5",
+      "shadow": "shadow-sm shadow-slate-200/50",
+      "border": "border border-slate-100"
+    }
+  },
+  "components": {
+    "hero_banner": {
+      "structure": "Relative container with bg-gradient-to-r, rounded-3xl",
+      "title": "'Reliable Local Services At Your Doorstep'",
+      "subtitle": "'Fast. Trusted. Verified.'",
+      "text_color": "text-white",
+      "image_treatment": "Absolute positioned illustration/photo on the right side, overlapping slightly at the bottom. Use transparent PNG or masked image."
+    },
+    "service_categories": {
+      "layout": "Grid of 5 items, flex-row wrap. Items are 30% width.",
+      "item_style": "bg-white rounded-2xl p-4 items-center shadow-sm border border-slate-50",
+      "icon_style": "w-8 h-8 text-blue-600 mb-2"
+    },
+    "bottom_navigation": {
+      "layout": "Absolute bottom-0 w-full flex-row justify-around items-center bg-white pt-3 pb-safe border-t border-slate-100",
+      "active_state": "text-blue-600",
+      "inactive_state": "text-slate-400"
+    },
+    "worker_card": {
+      "layout": "flex-row items-center bg-white p-4 rounded-2xl border border-slate-100",
+      "avatar": "w-16 h-16 rounded-full",
+      "badge": "bg-emerald-50 text-emerald-600 px-2 py-1 rounded-md text-xs font-bold",
+      "actions": "flex-row space-x-3 mt-4",
+      "action_button": "flex-1 bg-blue-50 py-3 rounded-xl items-center justify-center text-blue-700 font-semibold"
+    },
+    "booking_form": {
+      "input": "bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-900 font-medium",
+      "date_chip": "px-4 py-2 rounded-full border border-slate-200",
+      "date_chip_active": "bg-blue-600 border-blue-600 text-white"
+    },
+    "pin_input": {
+      "layout": "flex-row justify-center space-x-4 my-8",
+      "box": "w-14 h-14 bg-slate-50 border-2 border-slate-200 rounded-2xl items-center justify-center",
+      "text": "text-2xl font-bold text-slate-900"
+    }
+  },
+  "testing": {
+    "mandatory_attribute": "data-testid",
+    "convention": "kebab-case, role-based (e.g., 'login-otp-input', 'book-now-button', 'worker-accept-button')"
+  },
+  "media_assets": {
+    "hero_worker_image": "https://images.unsplash.com/photo-1649769069590-268b0b994462?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1MDZ8MHwxfHNlYXJjaHwzfHxwcm9mZXNzaW9uYWwlMjBpbmRpYW4lMjBwbHVtYmVyJTIwc21pbGluZyUyMHVuaWZvcm18ZW58MHx8fHwxNzgwNTA5ODk4fDA&ixlib=rb-4.1.0&q=85",
+    "electrician_profile": "https://images.unsplash.com/photo-1621905251918-48416bd8575a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBlbGVjdHJpY2lhbiUyMHVuaWZvcm18ZW58MHx8fHwxNzgwNTA5ODk1fDA&ixlib=rb-4.1.0&q=85",
+    "cleaner_profile": "https://images.unsplash.com/photo-1563453392212-326f5e854473?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNzl8MHwxfHNlYXJjaHwyfHxob21lJTIwY2xlYW5pbmclMjBzZXJ2aWNlJTIwcHJvZmVzc2lvbmFsfGVufDB8fHx8MTc4MDUwOTg5NXww&ixlib=rb-4.1.0&q=85"
+  },
+  "implementation_notes": {
+    "native_styling": "Use NativeWind (Tailwind for React Native). Do not use web-only CSS properties like 'hover' on mobile elements; rely on 'active' state via TouchableOpacity.",
+    "icons": "Use lucide-react-native for all system icons.",
+    "navigation": "Use Expo Router for file-based routing and deep linking.",
+    "safe_area": "Ensure SafeAreaView is used to prevent overlap with iOS dynamic island and Android status bar.",
+    "animations": "Use React Native Reanimated for subtle scale-in on the worker card and bottom sheet spring animations."
+  }
+}

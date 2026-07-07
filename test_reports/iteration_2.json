@@ -1,0 +1,71 @@
+{
+  "summary": "Backend security-hardening tests for HomeMate. Wrote new /app/backend/tests/test_security.py (14 tests) covering OTP rate-limit (3/min -> 4th=429), OTP verify 5-wrong-cap, OTP single-use, admin login audit, KYC MIME/size validation (5 MB, JPG/PNG/PDF), admin KYC approve/reject + audit, PIN 5-attempt cap, and audit_logs growth. Also re-ran the existing 31-test suite (test_homemate_backend.py) after fixing the categories CRUD test (now uses admin token). Total 45 tests collected, 42 passing (93%). CRITICAL bug found and fixed: verify-otp was returning 500 because MongoDB returns naive datetimes for `expires_at` and the new TZ-aware comparison `expires_at < now_utc()` threw TypeError - normalised to UTC-aware. Two confirmed backend gaps still exist (admin-login does not write audit_log; PIN attempt cap does not auto-cancel booking) - per spec. All OTP security primitives (rate limit, attempt cap, single-use) work correctly. KYC MIME + 5 MB enforcement works correctly. Admin KYC approve/reject + audit works correctly.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/auth/verify-otp",
+        "issue": "FIXED by testing agent. Was returning 500 'can't compare offset-naive and offset-aware datetimes'. MongoDB returned `expires_at` as naive datetime while `now_utc()` is tz-aware. Made comparison TZ-safe at server.py:262-267 by normalising naive datetimes to UTC.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/auth/admin-login",
+        "issue": "Spec section 3 requires an audit_log entry to be created on admin login. Current implementation (server.py:305-321) does NOT call `audit()`. Add `await audit(admin['id'], 'admin_login')` before returning the token. Test: test_security.py::TestAdminLogin::test_right_password_returns_admin_jwt fails on audit-log assertion.",
+        "priority": "HIGH"
+      },
+      {
+        "endpoint": "POST /api/bookings/{bid}/verify-pin",
+        "issue": "Spec section 8c requires booking to auto-cancel after 5 wrong PIN attempts. Current implementation (server.py:717-731) returns 429 on attempt 5 and writes `pin_locked` audit, but the booking remains in `in_progress` status. Add `await db.bookings.update_one({'id': bid}, {'$set': {'status': 'cancelled', 'cancelled_by': 'system', 'cancellation_reason': 'PIN attempts exceeded', 'cancelled_at': now_utc()}})` and an audit/booking_cancelled entry inside the `if attempts >= PIN_MAX_ATTEMPTS:` branch.",
+        "priority": "HIGH"
+      },
+      {
+        "endpoint": "POST /api/bookings/{bid}/verify-pin",
+        "issue": "Off-by-one (subjective): code increments pin_attempts BEFORE the cap check, so a worker only gets 4 chances to enter the correct PIN (5th wrong attempt returns 429). Spec language `5-attempt cap` is consistent with this, but the user-facing experience is 'you get 4 tries, the 5th locks you out'. Consider documenting or moving the increment after the cap check so 5 wrong attempts each return 400 and the 6th returns 429."
+      },
+      {
+        "endpoint": "POST /api/auth/admin-login",
+        "issue": "After first call the admin user is created with no `mobile` (set to literal 'admin') and re-used across calls. Subsequent admin-login calls always return the same user id - fine for now, but if multiple ops people exist this is single-shared-account. Out of scope for MVP."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_homemate_backend.py",
+    "/app/backend/tests/test_security.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Add `await audit(admin['id'], 'admin_login')` to admin_login endpoint (server.py:305-321) so a sensitive-action log row is written per spec section 3.",
+    "Inside verify-pin's `if attempts >= PIN_MAX_ATTEMPTS:` block, set booking status to 'cancelled' (with cancelled_by='system', cancellation_reason='PIN attempts exceeded') and write a booking_cancelled audit entry, then push-notify both customer and worker. Spec section 8c requires auto-cancel.",
+    "Already fixed by testing agent: verify-otp 500 due to naive/aware datetime comparison at server.py:262-267. Verify the fix is acceptable (it normalises naive UTC datetimes to aware before compare).",
+    "Optional: consider moving the pin_attempts increment after the cap check so the 5th wrong attempt itself returns 429 (matches spec language more cleanly), or update docs to say 4 wrong then 5th locks."
+  ],
+  "critical_code_review_comments": [
+    "MongoDB returns naive datetimes by default. Any code comparing motor docs' datetimes against `now_utc()` must normalise. There's at least one more place this could bite (no other direct comparisons today, but seed_db inserts naive-via-now_utc() converted by motor). Consider initialising motor with `tz_aware=True` for client-wide safety: `AsyncIOMotorClient(mongo_url, tz_aware=True)`.",
+    "verify-pin does NOT verify that booking status is `in_progress` before accepting a PIN. A worker could call verify-pin on a worker_assigned booking (status not yet 'in_progress') and complete it without the start step. Add a status check.",
+    "Admin login creates the admin user lazily on first hit but never re-validates the password against a stored hash - always trusts ADMIN_PASSWORD env. Acceptable for MVP but should log auth attempts (audit) and rate-limit failures.",
+    "ALLOWED_DOC_MIMES intentionally allows `image/jpg` (non-standard) in addition to `image/jpeg`. Real browsers/uploaders typically send only `image/jpeg`; the duplicate is harmless but worth noting.",
+    "server.py is now ~1060 lines, exceeding the 700-line guideline. Suggest splitting auth/bookings/admin into separate routers.",
+    "@app.on_event('startup'/'shutdown') is deprecated in FastAPI; migrate to lifespan context manager."
+  ],
+  "updated_files": [
+    "/app/backend/server.py (bugfix at verify_otp: TZ-normalise expires_at before comparison)",
+    "/app/backend/tests/test_homemate_backend.py (categories CRUD now uses admin token; _login retries on 429)",
+    "/app/backend/tests/test_security.py (new: 14 security tests)"
+  ],
+  "success_rate": {
+    "backend": "93% (42/45). 3 failures: 1 admin-login-missing-audit (real bug), 1 PIN-no-auto-cancel (real bug), 1 sporadic 429 rate-limit on a seeded worker mobile when other tests just used it (test setup issue, not backend bug; helper retries once).",
+    "frontend": "skipped (backend-only request)"
+  },
+  "seed_data_creation": "None persisted. All test users use TEST_-prefixed names and random Indian mobiles. Categories created in CRUD test are deleted in the same test. Bookings/audit_logs remain in DB but are isolated by random UUID.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend URL from EXPO_PUBLIC_BACKEND_URL in /app/frontend/.env. Mock OTP accepts 123456 for any mobile. Seeded workers at mobiles 999990001/999990002/999990003 (already approved). The 3-OTP/min rate limit applies per-mobile - tests that reuse the same seeded mobile in quick succession will hit 429 (use unique mobiles or sleep 65s). PIN cap returns 429 on the 5th wrong attempt (not 6th) because increment happens before the cap check. Two known un-implemented spec items remain (re-verify after main agent fix): admin_login audit entry, and PIN-lock auto-cancel. Run tests with: `pytest /app/backend/tests/ -v --junitxml=/app/test_reports/pytest/pytest_results.xml`.",
+  "rca_of_issue": "verify-otp 500 RCA: server.py introduced TZ-aware datetime comparison `expires_at < now_utc()` in this iteration's hardening. Motor (async PyMongo) returns BSON datetimes as naive UTC by default, so the OTP record's `expires_at` arrived as a naive datetime even though it was inserted with `now_utc()` (aware). Python raises TypeError on aware<>naive comparisons. Fix: normalise the naive value to aware UTC via `.replace(tzinfo=timezone.utc)` before compare. Long-term mitigation: initialise the motor client with `tz_aware=True` so all datetime fields round-trip as aware. Reproduction before fix: `curl POST /api/auth/send-otp` then `POST /api/auth/verify-otp` returned 500 with traceback 'can't compare offset-naive and offset-aware datetimes' (see backend.err.log)."
+}
