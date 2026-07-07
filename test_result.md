@@ -109,63 +109,63 @@ user_problem_statement: |
 backend:
   - task: "POST /api/bookings requires `pincode` (6-digit) and rejects with 400 'Sorry, services are currently unavailable in your area.' when the pincode has no enabled service area"
     implemented: true
-    working: "NA"
+    working: true
     file: "backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
-      - working: "NA"
-        agent: "main"
-        comment: "BookingIn now includes required `pincode`. create_booking validates 6-digit numeric pincode, looks up an enabled service_area via `_service_area_for_pincode`; if missing/disabled, 400 with the exact message above. On success, stores `pincode` + `service_area_id` on the booking."
+      - working: true
+        agent: "testing"
+        comment: "iteration 5 — verified byte-for-byte error message; also validates 6-digit rule and 422 on missing pincode."
 
   - task: "Public GET /api/service-areas/check?pincode=XXXXXX returns { serviced, area? }"
     implemented: true
-    working: "NA"
+    working: true
     file: "backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
-      - working: "NA"
-        agent: "main"
-        comment: "Public unauthenticated endpoint. 400 on non-6-digit / non-numeric pincode. serviced=false when no enabled area exists; serviced=true with the area document when one exists."
+      - working: true
+        agent: "testing"
+        comment: "iteration 5 — 200/serviced=true for 400050, 200/serviced=false for 999999, 400 on invalid; unauthenticated OK."
 
   - task: "Admin CRUD: GET/POST/PATCH/DELETE /api/admin/service-areas + GET /api/admin/service-areas/{id}/stats"
     implemented: true
-    working: "NA"
+    working: true
     file: "backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
-      - working: "NA"
-        agent: "main"
-        comment: "Full admin CRUD guarded by require_admin. Uniqueness: cannot create two areas with the same pincode; PATCH pincode conflict returns 400. Stats endpoint returns { customers, bookings, workers } counted by matching pincode."
+      - working: true
+        agent: "testing"
+        comment: "iteration 5 — guards (401/403 for customer/worker), full CRUD, duplicate/collision guards, /stats returns ints."
 
   - task: "Auto-assign restricted to workers whose pincode == booking.pincode AND kyc_status == approved (no cross-area assignment)"
     implemented: true
-    working: "NA"
+    working: true
     file: "backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
-      - working: "NA"
-        agent: "main"
-        comment: "_auto_assign now filters by booking pincode. An approved worker in a different pincode is NEVER assigned. Only approved workers are ever considered — pending/rejected still excluded (from iteration 4)."
+      - working: true
+        agent: "testing"
+        comment: "iteration 5 — 560001 worker never picks up 400050 traffic; disabling an area blocks new bookings but leaves existing ones intact."
 
   - task: "Seed default service area (Bandra West / 400050 / Mumbai / radius 5km / enabled) so the seeded demo workers (pincode 400050) can pick up bookings"
     implemented: true
-    working: "NA"
+    working: true
     file: "backend/server.py"
     stuck_count: 0
     priority: "medium"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
-      - working: "NA"
-        agent: "main"
-        comment: "Seeded on startup if the service_areas collection is empty."
+      - working: true
+        agent: "testing"
+        comment: "iteration 5 — also added a one-line migration to backfill pincode='400050' on pre-existing seeded demo workers."
 
 frontend:
   - task: "Customer booking form asks for pincode + preflight service-area check + inline 'unavailable' message"
@@ -262,4 +262,23 @@ agent_communication:
       - Existing iteration-4 test suite `test_worker_kyc_verification.py` sends
         upload-kyc calls; those tests continue to be relevant but do not test
         service areas. The two `.obsolete` files can be ignored.
+  - agent: "testing"
+    message: |
+      Iteration 5: 55/55 PASS (28 new + 27 iteration-4 regression). Every
+      requested behavior verified.
+      - Public /service-areas/check: 200/serviced=true for 400050, 200/serviced=false for 999999, 400 on bad pincode, no-auth confirmed.
+      - Admin CRUD guarded (401/403), full lifecycle (create, duplicate, empty-name, empty-city, non-6-digit, PATCH enable/disable, PATCH pincode collision, /stats returning ints, delete).
+      - Booking gate: 200 with service_area_id when pincode='400050'; 400 with EXACT detail "Sorry, services are currently unavailable in your area." for 999999 (byte-for-byte); 400 '6-digit' message for '12345'; 422 when missing.
+      - Cross-area safety: 560001 worker never receives 400050 traffic and vice versa.
+      - Disable-area blocks new bookings; already-created bookings untouched.
+      - Regression: full booking lifecycle + KYC approve/reject still green.
+      - No `_id` leakage anywhere.
+      Fixed a small seed regression along the way: seeded demo workers were
+      created before the `pincode` field existed, so `_auto_assign` returned
+      None. Added a one-line update_many migration in seed_db that backfills
+      pincode='400050' on the three known demo worker mobiles. Backend
+      restarted, all tests now pass.
+      Report at /app/test_reports/iteration_5.json. Suite at
+      /app/backend/tests/test_service_areas.py.
+      retest_needed: false.
 
