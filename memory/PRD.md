@@ -57,8 +57,10 @@ With `cancelled` reachable from the first three.
 - **APK build**: Use the **Publish** button in the top-right of Emergent to generate an Android APK — no Play Store needed.
 
 ## Admin credentials
-- URL: `/admin/login` on the web preview
+- URL: `/admin/login` on the web preview (part of the main app — not a separate panel yet)
 - Password: `admin123` (override via `ADMIN_PASSWORD` in `/app/backend/.env`)
+
+> Admin lives inside the customer Expo app under the `/app/frontend/app/admin/` route group. Customers never see any Admin menu; the `/admin/*` routes are guarded — a non-admin session is redirected to `/admin/login`. A fully separate Admin Panel project can be re-introduced before production.
 
 ## Status flow (extended)
 `created → worker_assigned → worker_accepted → in_progress → completed`
